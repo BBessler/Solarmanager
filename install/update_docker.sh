@@ -1,0 +1,166 @@
+#!/bin/bash
+# =============================================================================
+# Solarmanager - Docker Update
+# Laedt die neuesten Releases herunter und startet die Container neu
+# =============================================================================
+
+set -e
+
+# Parameter verarbeiten
+CHANNEL="stable"
+AUTO_MODE=false
+BACKEND_VERSION=""
+FRONTEND_VERSION=""
+for arg in "$@"; do
+    case "$arg" in
+        --beta)  CHANNEL="beta" ;;
+        --auto)  AUTO_MODE=true ;;
+        --backend-version=*)  BACKEND_VERSION="${arg#*=}" ;;
+        --frontend-version=*) FRONTEND_VERSION="${arg#*=}" ;;
+    esac
+done
+
+INSTALL_DIR="$HOME/solarmanager"
+VERSION_FILE="$INSTALL_DIR/app/.solarmanager_versions"
+
+# Shared Library laden
+LIB_DIR="$(dirname "$0")"
+if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
+    curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh" \
+        -o "$LIB_DIR/lib_solarmanager.sh"
+fi
+. "$LIB_DIR/lib_solarmanager.sh"
+
+if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    echo "FEHLER: $INSTALL_DIR/docker-compose.yml nicht gefunden."
+    echo "Bitte zuerst setup_docker.sh ausfuehren."
+    exit 1
+fi
+
+cd "$INSTALL_DIR"
+
+echo "### Solarmanager Docker Update ($CHANNEL) ###"
+echo ""
+
+# Installierte Versionen laden
+INSTALLED_BACKEND="(unbekannt)"
+INSTALLED_FRONTEND="(unbekannt)"
+if [ -f "$VERSION_FILE" ]; then
+    . "$VERSION_FILE"
+fi
+
+# Alle Releases abfragen
+echo "[INFO] Pruefe auf neue Versionen..."
+sm_fetch_releases || exit 1
+
+if [ -n "$BACKEND_VERSION" ]; then
+    LATEST_BACKEND_INFO=$(sm_get_by_tag "$BACKEND_VERSION")
+elif [ "$CHANNEL" = "beta" ]; then
+    LATEST_BACKEND_INFO=$(sm_get_latest "beta-backend-" "beta")
+else
+    LATEST_BACKEND_INFO=$(sm_get_latest "backend-" "stable")
+fi
+
+if [ -n "$FRONTEND_VERSION" ]; then
+    LATEST_FRONTEND_INFO=$(sm_get_by_tag "$FRONTEND_VERSION")
+elif [ "$CHANNEL" = "beta" ]; then
+    LATEST_FRONTEND_INFO=$(sm_get_latest "beta-frontend-" "beta")
+else
+    LATEST_FRONTEND_INFO=$(sm_get_latest "frontend-" "stable")
+fi
+
+LATEST_BACKEND_TAG=$(echo "$LATEST_BACKEND_INFO" | cut -d'|' -f1)
+LATEST_BACKEND_URL=$(echo "$LATEST_BACKEND_INFO" | cut -d'|' -f2)
+
+LATEST_FRONTEND_TAG=$(echo "$LATEST_FRONTEND_INFO" | cut -d'|' -f1)
+LATEST_FRONTEND_URL=$(echo "$LATEST_FRONTEND_INFO" | cut -d'|' -f2)
+
+echo ""
+echo "  Installiert        Verfuegbar"
+echo "  Backend:  $INSTALLED_BACKEND  ->  $LATEST_BACKEND_TAG"
+echo "  Frontend: $INSTALLED_FRONTEND  ->  $LATEST_FRONTEND_TAG"
+echo ""
+
+BACKEND_CHANGED=false
+FRONTEND_CHANGED=false
+
+if [ "$LATEST_BACKEND_TAG" != "$INSTALLED_BACKEND" ]; then
+    BACKEND_CHANGED=true
+fi
+if [ "$LATEST_FRONTEND_TAG" != "$INSTALLED_FRONTEND" ]; then
+    FRONTEND_CHANGED=true
+fi
+
+if [ "$BACKEND_CHANGED" = false ] && [ "$FRONTEND_CHANGED" = false ]; then
+    echo "[INFO] Alles aktuell."
+    if [ "$AUTO_MODE" = true ]; then
+        exit 0
+    fi
+    read -p "Trotzdem neu installieren? (j/n) [n]: " CONFIRM
+    CONFIRM="${CONFIRM:-n}"
+    if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
+        echo "[INFO] Abgebrochen."
+        exit 0
+    fi
+    # Bei Reinstall alles herunterladen
+    BACKEND_CHANGED=true
+    FRONTEND_CHANGED=true
+else
+    if [ "$AUTO_MODE" = false ]; then
+        read -p "Update jetzt durchfuehren? (j/n) [j]: " CONFIRM
+        CONFIRM="${CONFIRM:-j}"
+        if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
+            echo "[INFO] Update abgebrochen."
+            exit 0
+        fi
+    else
+        echo "[AUTO] Update wird durchgefuehrt..."
+    fi
+fi
+
+# Backend aktualisieren (nur wenn geaendert)
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+    echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
+    sm_download_and_extract "$LATEST_BACKEND_URL" "$INSTALL_DIR/app" || exit 1
+    echo "[OK] Backend aktualisiert."
+fi
+
+# Frontend aktualisieren (nur wenn geaendert)
+if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_TAG" ]; then
+    echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
+    sm_download_and_extract "$LATEST_FRONTEND_URL" "$INSTALL_DIR/app/wwwroot" || exit 1
+
+    # config.json aus .env generieren (IP fuer VPN-Kompatibilitaet)
+    . "$INSTALL_DIR/.env"
+    cat > "$INSTALL_DIR/app/wwwroot/config.json" <<CFGEOF
+{
+  "API_URL": "http://${SERVER_IP}/",
+  "APP_ENV": "production"
+}
+CFGEOF
+    echo "[OK] config.json mit IP $SERVER_IP generiert."
+    echo "[OK] Frontend aktualisiert."
+fi
+
+# Container neu starten
+echo "[INFO] Starte Container neu..."
+docker compose up -d
+docker compose restart solarmanager
+
+echo ""
+echo "[INFO] Warte auf Backend-Start..."
+if sm_health_check "http://localhost:8080" 60; then
+    echo ""
+    echo "[OK] Backend ist bereit."
+else
+    echo "[WARNUNG] Backend antwortet noch nicht. Bitte manuell pruefen: docker compose logs -f"
+fi
+
+# Versionen NACH erfolgreichem Health-Check speichern
+cat > "$VERSION_FILE" <<EOF
+INSTALLED_BACKEND="$LATEST_BACKEND_TAG"
+INSTALLED_FRONTEND="$LATEST_FRONTEND_TAG"
+EOF
+
+echo ""
+echo "### Update abgeschlossen! ###"
