@@ -20,7 +20,7 @@ Energiemanagementsystem zur intelligenten Steuerung von PV-Anlagen, Wallboxen, B
 
 | Kategorie | Geräte |
 |-----------|--------|
-| **PV-Wechselrichter** | Huawei (Modbus), Huawei (Fusion Portal), SMA, SunSpec, Shelly |
+| **PV-Wechselrichter** | Huawei (Modbus), Huawei (Fusion Portal), SMA, SunSpec, Shelly für BKW |
 | **Wallboxen** | go-eCharger, Easee, OCPP 1.6, SunSpec |
 | **Batteriespeicher** | Marstek, Huawei |
 | **Elektrofahrzeuge** | Tesla, BMW, Hyundai, Kia, VW, Audo, Skoda, Cupra, Mercedes |
