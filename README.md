@@ -16,6 +16,21 @@ Energiemanagementsystem zur intelligenten Steuerung von PV-Anlagen, Wallboxen, B
 
 ---
 
+## Unterstützte Geräte
+
+| Kategorie | Geräte |
+|-----------|--------|
+| **PV-Wechselrichter** | Huawei (Modbus), Huawei (Fusion Portal), SMA, SunSpec, Fronius, Kostal, GoodWe, SolarEdge, Growatt, Shelly (BKW) |
+| **Wallboxen** | go-eCharger, Easee, OCPP 1.6, SunSpec (Modbus), Keba, Fronius Wattpilot, Mennekes, Webasto, Hardy Barth, Heidelberg |
+| **Batteriespeicher** | Marstek, Huawei |
+| **Elektrofahrzeuge** | Tesla, BMW, Hyundai, Kia, VW, Audi, Skoda, Seat/Cupra, Mercedes, Opel, Peugeot, Citroën, DS, Renault |
+| **Smart Home** | Shelly |
+| **Heizung** | Heizstab (via Shelly), Buderus KM200 |
+| **PV-Prognose** | Solcast, Solarmanager (intern) |
+| **Stromanbieter** | Tibber |
+
+---
+
 ## Installation & Dokumentation
 
 Die vollständige Installationsanleitung findest du im **[Wiki](https://github.com/BBessler/Solarmanager/wiki)**:
