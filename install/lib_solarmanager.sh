@@ -83,10 +83,10 @@ sm_download_and_extract() {
 
     if [ "$use_sudo" = "true" ]; then
         sudo mkdir -p "$target_dir"
-        sudo tar -xzf "$tmp_file" -C "$target_dir"
+        sudo tar --overwrite --no-same-owner -xzf "$tmp_file" -C "$target_dir"
     else
         mkdir -p "$target_dir"
-        tar -xzf "$tmp_file" -C "$target_dir"
+        tar --overwrite --no-same-owner -xzf "$tmp_file" -C "$target_dir"
     fi
 
     if [ $? -ne 0 ]; then

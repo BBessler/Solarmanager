@@ -130,15 +130,14 @@ if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_TAG" ]; then
     echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
     sm_download_and_extract "$LATEST_FRONTEND_URL" "$INSTALL_DIR/app/wwwroot" || exit 1
 
-    # config.json aus .env generieren (IP fuer VPN-Kompatibilitaet)
-    . "$INSTALL_DIR/.env"
+    # config.json generieren (relative URL - funktioniert mit Hostname und IP)
     cat > "$INSTALL_DIR/app/wwwroot/config.json" <<CFGEOF
 {
-  "API_URL": "http://${SERVER_IP}/",
+  "API_URL": "/",
   "APP_ENV": "production"
 }
 CFGEOF
-    echo "[OK] config.json mit IP $SERVER_IP generiert."
+    echo "[OK] config.json generiert (API_URL: /)."
     echo "[OK] Frontend aktualisiert."
 fi
 

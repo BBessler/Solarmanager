@@ -94,6 +94,8 @@ echo "[AUTO] Update wird durchgefuehrt..."
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_URL" ]; then
     echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
     sm_download_and_extract "$LATEST_BACKEND_URL" "$APP_DIR" || exit 1
+    # .NET 9 Static-Web-Assets-Manifest entfernen (Frontend wird separat deployed)
+    rm -f "$APP_DIR/Solarmanager.staticwebassets.endpoints.json"
     echo "[OK] Backend aktualisiert."
 fi
 
@@ -101,19 +103,16 @@ fi
 if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_URL" ]; then
     echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
 
-    # config.json sichern (wird in Docker aus .env generiert)
-    CONFIG_BACKUP=""
-    if [ -f "$APP_DIR/wwwroot/config.json" ]; then
-        CONFIG_BACKUP=$(cat "$APP_DIR/wwwroot/config.json")
-    fi
-
     sm_download_and_extract "$LATEST_FRONTEND_URL" "$APP_DIR/wwwroot" || exit 1
 
-    # config.json wiederherstellen
-    if [ -n "$CONFIG_BACKUP" ]; then
-        echo "$CONFIG_BACKUP" > "$APP_DIR/wwwroot/config.json"
-        echo "[OK] config.json wiederhergestellt."
-    fi
+    # config.json generieren (relative URL - funktioniert mit Hostname und IP)
+    cat > "$APP_DIR/wwwroot/config.json" <<CFGEOF
+{
+  "API_URL": "/",
+  "APP_ENV": "production"
+}
+CFGEOF
+    echo "[OK] config.json generiert."
     echo "[OK] Frontend aktualisiert."
 fi
 

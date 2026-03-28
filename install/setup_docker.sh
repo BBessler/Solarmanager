@@ -680,20 +680,13 @@ echo "[OK] Frontend $FRONTEND_TAG installiert."
 
 # Frontend-Konfiguration
 echo "[INFO] Konfiguriere Frontend..."
-if [ "$ssl_mode" = "letsencrypt" ]; then
-    FRONTEND_API_URL="https://${hostname}/"
-elif [ "$ssl_mode" = "selfsigned" ]; then
-    FRONTEND_API_URL="https://${SERVER_IP}/"
-else
-    FRONTEND_API_URL="http://${SERVER_IP}/"
-fi
 cat > "$INSTALL_DIR/app/wwwroot/config.json" <<EOF
 {
-  "API_URL": "${FRONTEND_API_URL}",
+  "API_URL": "/",
   "APP_ENV": "production"
 }
 EOF
-echo "[OK] Frontend config.json konfiguriert (API_URL: ${FRONTEND_API_URL})."
+echo "[OK] Frontend config.json konfiguriert (API_URL: /)."
 
 # =============================================================================
 # Phase 6: Docker Image bauen und Container starten
