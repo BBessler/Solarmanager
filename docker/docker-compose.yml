@@ -30,6 +30,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+      - ./app/wwwroot:/srv/wwwroot:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

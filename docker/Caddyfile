@@ -4,22 +4,49 @@
 }
 
 {$SERVER_HOST}, {$SERVER_IP} {
+	root * /srv/wwwroot
+
 	handle_path /phpmyadmin/* {
 		reverse_proxy host.docker.internal:8081
 	}
 	handle /phpmyadmin {
 		redir /phpmyadmin/ permanent
 	}
-	reverse_proxy host.docker.internal:8080
+
+	# Statische Dateien direkt von Caddy ausliefern (inkl. / -> index.html)
+	@static file {
+		try_files {path} {path}/index.html
+	}
+	handle @static {
+		file_server
+	}
+
+	# Alles andere (API, Swagger, SPA-Routen) ans Backend
+	handle {
+		reverse_proxy host.docker.internal:8080
+	}
+
 	tls internal
 }
 
 :80 {
+	root * /srv/wwwroot
+
 	handle_path /phpmyadmin/* {
 		reverse_proxy host.docker.internal:8081
 	}
 	handle /phpmyadmin {
 		redir /phpmyadmin/ permanent
 	}
-	reverse_proxy host.docker.internal:8080
+
+	@static file {
+		try_files {path} {path}/index.html
+	}
+	handle @static {
+		file_server
+	}
+
+	handle {
+		reverse_proxy host.docker.internal:8080
+	}
 }
