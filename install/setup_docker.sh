@@ -606,13 +606,25 @@ if [ "$ssl_mode" = "none" ]; then
     echo "[INFO] SSL deaktiviert - konfiguriere nur HTTP..."
     cat > Caddyfile <<'CADDYEOF'
 :80 {
+	root * /srv/wwwroot
+
 	handle_path /phpmyadmin/* {
 		reverse_proxy host.docker.internal:8081
 	}
 	handle /phpmyadmin {
 		redir /phpmyadmin/ permanent
 	}
-	reverse_proxy host.docker.internal:8080
+
+	@static file {
+		try_files {path} {path}/index.html
+	}
+	handle @static {
+		file_server
+	}
+
+	handle {
+		reverse_proxy host.docker.internal:8080
+	}
 }
 CADDYEOF
     # Port 443 aus docker-compose entfernen
@@ -626,13 +638,25 @@ elif [ "$ssl_mode" = "letsencrypt" ]; then
 }
 
 {\$SERVER_HOST} {
+	root * /srv/wwwroot
+
 	handle_path /phpmyadmin/* {
 		reverse_proxy host.docker.internal:8081
 	}
 	handle /phpmyadmin {
 		redir /phpmyadmin/ permanent
 	}
-	reverse_proxy host.docker.internal:8080
+
+	@static file {
+		try_files {path} {path}/index.html
+	}
+	handle @static {
+		file_server
+	}
+
+	handle {
+		reverse_proxy host.docker.internal:8080
+	}
 }
 CADDYEOF
     echo "[OK] Let's Encrypt Konfiguration."
