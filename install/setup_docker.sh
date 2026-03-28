@@ -253,8 +253,37 @@ read -rp "Datenbank-Passwort [solarmanager]: " db_password
 db_password=${db_password:-solarmanager}
 
 echo ""
+echo "SSL/HTTPS-Konfiguration:"
+echo "  1) Self-Signed-Zertifikat  (Standard, fuer lokales Netzwerk)"
+echo "  2) Let's Encrypt           (nur fuer oeffentliche Domains, NICHT fuer .local)"
+echo "  3) Kein SSL                (nur HTTP)"
+echo ""
+read -rp "SSL-Modus [1]: " ssl_choice
+ssl_choice=${ssl_choice:-1}
+
+case "$ssl_choice" in
+    2) ssl_mode="letsencrypt" ;;
+    3) ssl_mode="none" ;;
+    *) ssl_mode="selfsigned" ;;
+esac
+
+if [ "$ssl_mode" = "letsencrypt" ]; then
+    if [[ "$hostname" == *.local ]] || [[ "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "$hostname" == localhost ]]; then
+        echo "[FEHLER] Let's Encrypt funktioniert nur mit oeffentlichen Domains (z.B. mein-solar.de)."
+        echo "         '$hostname' ist eine lokale Adresse. Bitte Self-Signed (1) oder Kein SSL (3) waehlen."
+        exit 1
+    fi
+    read -rp "E-Mail-Adresse fuer Let's Encrypt: " le_email
+    if [ -z "$le_email" ]; then
+        echo "[FEHLER] E-Mail-Adresse ist fuer Let's Encrypt erforderlich."
+        exit 1
+    fi
+fi
+
+echo ""
 echo "[INFO] Hostname:    $hostname"
 echo "[INFO] DB-Passwort: $db_password"
+echo "[INFO] SSL-Modus:   $ssl_mode"
 echo ""
 
 # =============================================================================
@@ -572,6 +601,45 @@ curl -fsSL "$REPO_RAW/docker/Dockerfile" -o Dockerfile
 curl -fsSL "$REPO_RAW/docker/Caddyfile" -o Caddyfile
 curl -fsSL "$REPO_RAW/docker/.env.example" -o .env.example
 
+# Caddyfile je nach SSL-Modus anpassen
+if [ "$ssl_mode" = "none" ]; then
+    echo "[INFO] SSL deaktiviert - konfiguriere nur HTTP..."
+    cat > Caddyfile <<'CADDYEOF'
+:80 {
+	handle_path /phpmyadmin/* {
+		reverse_proxy host.docker.internal:8081
+	}
+	handle /phpmyadmin {
+		redir /phpmyadmin/ permanent
+	}
+	reverse_proxy host.docker.internal:8080
+}
+CADDYEOF
+    # Port 443 aus docker-compose entfernen
+    sed -i '/"443:443"/d' docker-compose.yml
+    echo "[OK] HTTP-Only Konfiguration."
+elif [ "$ssl_mode" = "letsencrypt" ]; then
+    echo "[INFO] Let's Encrypt - konfiguriere automatische Zertifikate..."
+    cat > Caddyfile <<CADDYEOF
+{
+	email ${le_email}
+}
+
+{\$SERVER_HOST} {
+	handle_path /phpmyadmin/* {
+		reverse_proxy host.docker.internal:8081
+	}
+	handle /phpmyadmin {
+		redir /phpmyadmin/ permanent
+	}
+	reverse_proxy host.docker.internal:8080
+}
+CADDYEOF
+    echo "[OK] Let's Encrypt Konfiguration."
+else
+    echo "[OK] Self-Signed SSL Konfiguration (Standard)."
+fi
+
 # IP-Adresse automatisch ermitteln
 SERVER_IP=$(hostname -I | awk '{print $1}')
 echo "[INFO] Erkannte IP-Adresse: $SERVER_IP"
@@ -612,13 +680,20 @@ echo "[OK] Frontend $FRONTEND_TAG installiert."
 
 # Frontend-Konfiguration
 echo "[INFO] Konfiguriere Frontend..."
+if [ "$ssl_mode" = "letsencrypt" ]; then
+    FRONTEND_API_URL="https://${hostname}/"
+elif [ "$ssl_mode" = "selfsigned" ]; then
+    FRONTEND_API_URL="https://${SERVER_IP}/"
+else
+    FRONTEND_API_URL="http://${SERVER_IP}/"
+fi
 cat > "$INSTALL_DIR/app/wwwroot/config.json" <<EOF
 {
-  "API_URL": "http://${SERVER_IP}/",
+  "API_URL": "${FRONTEND_API_URL}",
   "APP_ENV": "production"
 }
 EOF
-echo "[OK] Frontend config.json konfiguriert."
+echo "[OK] Frontend config.json konfiguriert (API_URL: ${FRONTEND_API_URL})."
 
 # =============================================================================
 # Phase 6: Docker Image bauen und Container starten
@@ -652,9 +727,15 @@ echo "  Installation abgeschlossen!"
 echo "============================================"
 echo ""
 echo "Zugriff:"
-echo "  Frontend:       https://$hostname"
-echo "  API/Swagger:    https://$hostname/swagger"
-echo "  phpMyAdmin:     https://$hostname/phpmyadmin"
+if [ "$ssl_mode" = "none" ]; then
+    echo "  Frontend:       http://$hostname"
+    echo "  API/Swagger:    http://$hostname/swagger"
+    echo "  phpMyAdmin:     http://$hostname/phpmyadmin"
+else
+    echo "  Frontend:       https://$hostname"
+    echo "  API/Swagger:    https://$hostname/swagger"
+    echo "  phpMyAdmin:     https://$hostname/phpmyadmin"
+fi
 echo "  Portainer:      https://$hostname:9443"
 echo ""
 echo "Nuetzliche Befehle:"
@@ -664,4 +745,8 @@ echo "  docker compose restart           # Neu starten"
 echo "  docker compose down              # Stoppen"
 echo "  docker compose up -d             # Starten"
 echo ""
-echo "HINWEIS: Self-Signed-Zertifikat - Browser-Warnung beim ersten Zugriff bestaetigen."
+if [ "$ssl_mode" = "selfsigned" ]; then
+    echo "HINWEIS: Self-Signed-Zertifikat - Browser-Warnung beim ersten Zugriff bestaetigen."
+elif [ "$ssl_mode" = "letsencrypt" ]; then
+    echo "HINWEIS: Let's Encrypt Zertifikat wird automatisch von Caddy erneuert."
+fi

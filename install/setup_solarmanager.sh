@@ -47,9 +47,39 @@ SERVER_HOST="${SERVER_HOST:-solarmanager.local}"
 echo ""
 read -p "MariaDB Root-Passwort [solarmanager]: " DB_ROOT_PASSWORD
 DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-solarmanager}"
+
+echo ""
+echo "SSL/HTTPS-Konfiguration:"
+echo "  1) Self-Signed-Zertifikat  (Standard, fuer lokales Netzwerk)"
+echo "  2) Let's Encrypt           (nur fuer oeffentliche Domains, NICHT fuer .local)"
+echo "  3) Kein SSL                (nur HTTP)"
+echo ""
+read -p "SSL-Modus [1]: " ssl_choice
+ssl_choice=${ssl_choice:-1}
+
+case "$ssl_choice" in
+    2) ssl_mode="letsencrypt" ;;
+    3) ssl_mode="none" ;;
+    *) ssl_mode="selfsigned" ;;
+esac
+
+if [ "$ssl_mode" = "letsencrypt" ]; then
+    if [[ "$SERVER_HOST" == *.local ]] || [[ "$SERVER_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "$SERVER_HOST" == localhost ]]; then
+        echo "[FEHLER] Let's Encrypt funktioniert nur mit oeffentlichen Domains (z.B. mein-solar.de)."
+        echo "         '$SERVER_HOST' ist eine lokale Adresse. Bitte Self-Signed (1) oder Kein SSL (3) waehlen."
+        exit 1
+    fi
+    read -p "E-Mail-Adresse fuer Let's Encrypt: " le_email
+    if [ -z "$le_email" ]; then
+        echo "[FEHLER] E-Mail-Adresse ist fuer Let's Encrypt erforderlich."
+        exit 1
+    fi
+fi
+
 echo ""
 echo "[INFO] Hostname:      $SERVER_HOST"
 echo "[INFO] DB-Passwort:   $DB_ROOT_PASSWORD"
+echo "[INFO] SSL-Modus:     $ssl_mode"
 echo ""
 echo "Starte Installation..."
 
@@ -114,8 +144,10 @@ echo_step 55 "Firewall konfigurieren und Ports freigeben..."
 sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
 sudo ufw allow 90/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 453/tcp
+if [ "$ssl_mode" != "none" ]; then
+    sudo ufw allow 443/tcp
+    sudo ufw allow 453/tcp
+fi
 sudo ufw allow 3306/tcp
 sudo ufw allow 5000/tcp
 sudo ufw --force enable
@@ -127,44 +159,86 @@ if ! grep -q 'Include /etc/phpmyadmin/apache.conf' /etc/apache2/apache2.conf; th
   sudo bash -c "echo 'Include /etc/phpmyadmin/apache.conf' >> /etc/apache2/apache2.conf"
 fi
 sudo a2enmod rewrite
-sudo a2enmod ssl
-sudo a2enmod headers
 sudo a2enmod proxy
 sudo a2enmod proxy_http
-
-### 63% SSL-Zertifikat generieren
-echo_step 63 "SSL-Zertifikat generieren..."
-CERT_DIR="/etc/ssl/solarmanager"
-CERT_FILE="$CERT_DIR/solarmanager.crt"
-KEY_FILE="$CERT_DIR/solarmanager.key"
-
-# Zertifikat immer neu generieren, damit der Hostname stimmt
-echo "[INFO] Generiere Self-Signed-Zertifikat (10 Jahre) fuer '$SERVER_HOST'..."
-sudo mkdir -p "$CERT_DIR"
-
-# SubjectAltName je nach Eingabe (IP oder DNS)
-SAN_ENTRIES="DNS:localhost,IP:$IP_ADDR"
-if [[ "$SERVER_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  SAN_ENTRIES="IP:$SERVER_HOST,DNS:localhost"
-else
-  SAN_ENTRIES="DNS:$SERVER_HOST,DNS:localhost,IP:$IP_ADDR"
+if [ "$ssl_mode" != "none" ]; then
+    sudo a2enmod ssl
+    sudo a2enmod headers
 fi
 
-sudo openssl req -x509 -nodes -days 3650 \
-  -newkey rsa:2048 \
-  -keyout "$KEY_FILE" \
-  -out "$CERT_FILE" \
-  -subj "/CN=$SERVER_HOST" \
-  -addext "subjectAltName=$SAN_ENTRIES"
-sudo chmod 600 "$KEY_FILE"
-sudo chmod 644 "$CERT_FILE"
-echo "[OK] Zertifikat generiert."
+### 63% SSL-Zertifikat generieren/beschaffen
+if [ "$ssl_mode" = "selfsigned" ]; then
+    echo_step 63 "Self-Signed SSL-Zertifikat generieren..."
+    CERT_DIR="/etc/ssl/solarmanager"
+    CERT_FILE="$CERT_DIR/solarmanager.crt"
+    KEY_FILE="$CERT_DIR/solarmanager.key"
+
+    echo "[INFO] Generiere Self-Signed-Zertifikat (10 Jahre) fuer '$SERVER_HOST'..."
+    sudo mkdir -p "$CERT_DIR"
+
+    # SubjectAltName je nach Eingabe (IP oder DNS)
+    SAN_ENTRIES="DNS:localhost,IP:$IP_ADDR"
+    if [[ "$SERVER_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      SAN_ENTRIES="IP:$SERVER_HOST,DNS:localhost"
+    else
+      SAN_ENTRIES="DNS:$SERVER_HOST,DNS:localhost,IP:$IP_ADDR"
+    fi
+
+    sudo openssl req -x509 -nodes -days 3650 \
+      -newkey rsa:2048 \
+      -keyout "$KEY_FILE" \
+      -out "$CERT_FILE" \
+      -subj "/CN=$SERVER_HOST" \
+      -addext "subjectAltName=$SAN_ENTRIES"
+    sudo chmod 600 "$KEY_FILE"
+    sudo chmod 644 "$CERT_FILE"
+    echo "[OK] Self-Signed Zertifikat generiert."
+
+elif [ "$ssl_mode" = "letsencrypt" ]; then
+    echo_step 63 "Let's Encrypt Zertifikat beschaffen..."
+    install_if_missing certbot
+
+    # Temporaeren HTTP-VirtualHost fuer certbot-Challenge einrichten
+    sudo tee /etc/apache2/sites-available/solarmanager-http-temp.conf > /dev/null <<EOF
+<VirtualHost *:80>
+    ServerName $SERVER_HOST
+    DocumentRoot /var/www/html
+</VirtualHost>
+EOF
+    sudo a2ensite solarmanager-http-temp.conf > /dev/null 2>&1
+    sudo a2dissite 000-default.conf > /dev/null 2>&1
+    sudo systemctl restart apache2
+
+    echo "[INFO] Fordere Let's Encrypt Zertifikat fuer '$SERVER_HOST' an..."
+    sudo certbot certonly --webroot -w /var/www/html \
+        -d "$SERVER_HOST" \
+        --non-interactive --agree-tos --email "$le_email"
+
+    CERT_FILE="/etc/letsencrypt/live/$SERVER_HOST/fullchain.pem"
+    KEY_FILE="/etc/letsencrypt/live/$SERVER_HOST/privkey.pem"
+
+    # Temporaere Site entfernen
+    sudo a2dissite solarmanager-http-temp.conf > /dev/null 2>&1
+    sudo rm -f /etc/apache2/sites-available/solarmanager-http-temp.conf
+
+    # Auto-Renewal Timer aktivieren
+    if systemctl list-unit-files | grep -q certbot.timer; then
+        sudo systemctl enable certbot.timer
+        sudo systemctl start certbot.timer
+    fi
+
+    echo "[OK] Let's Encrypt Zertifikat beschafft."
+else
+    echo_step 63 "Kein SSL - ueberspringe Zertifikat-Generierung."
+fi
 
 ### 66% Apache VirtualHosts einrichten
 echo_step 66 "Apache VirtualHosts einrichten..."
 
-# HTTPS Frontend (Port 443)
-sudo tee /etc/apache2/sites-available/solarmanager-ssl.conf > /dev/null <<EOF
+# HTTPS VirtualHosts nur bei aktiviertem SSL
+if [ "$ssl_mode" != "none" ]; then
+    # HTTPS Frontend (Port 443)
+    sudo tee /etc/apache2/sites-available/solarmanager-ssl.conf > /dev/null <<EOF
 <VirtualHost *:443>
     ServerName $SERVER_HOST
     DocumentRoot /var/www/html
@@ -188,8 +262,8 @@ sudo tee /etc/apache2/sites-available/solarmanager-ssl.conf > /dev/null <<EOF
 </VirtualHost>
 EOF
 
-# HTTPS Backend-API (Port 453)
-sudo tee /etc/apache2/sites-available/solarmanager-api-ssl.conf > /dev/null <<EOF
+    # HTTPS Backend-API (Port 453)
+    sudo tee /etc/apache2/sites-available/solarmanager-api-ssl.conf > /dev/null <<EOF
 <VirtualHost *:453>
     ServerName $SERVER_HOST
     ProxyPreserveHost On
@@ -206,6 +280,8 @@ sudo tee /etc/apache2/sites-available/solarmanager-api-ssl.conf > /dev/null <<EO
     CustomLog \${APACHE_LOG_DIR}/solarmanager-api-ssl-access.log common
 </VirtualHost>
 EOF
+fi
+
 # HTTP Frontend (Port 80)
 sudo tee /etc/apache2/sites-available/solarmanager-redirect.conf > /dev/null <<EOF
 <VirtualHost *:80>
@@ -225,7 +301,6 @@ sudo tee /etc/apache2/sites-available/solarmanager-redirect.conf > /dev/null <<E
 </VirtualHost>
 EOF
 
-
 # HTTP Backend-API (Port 90)
 sudo tee /etc/apache2/sites-available/solarmanager-api-redirect.conf > /dev/null <<EOF
 <VirtualHost *:90>
@@ -239,13 +314,14 @@ sudo tee /etc/apache2/sites-available/solarmanager-api-redirect.conf > /dev/null
 </VirtualHost>
 EOF
 
-
 # Ports eintragen
-if ! grep -q 'Listen 443' /etc/apache2/ports.conf; then
-  sudo bash -c "echo 'Listen 443' >> /etc/apache2/ports.conf"
-fi
-if ! grep -q 'Listen 453' /etc/apache2/ports.conf; then
-  sudo bash -c "echo 'Listen 453' >> /etc/apache2/ports.conf"
+if [ "$ssl_mode" != "none" ]; then
+    if ! grep -q 'Listen 443' /etc/apache2/ports.conf; then
+      sudo bash -c "echo 'Listen 443' >> /etc/apache2/ports.conf"
+    fi
+    if ! grep -q 'Listen 453' /etc/apache2/ports.conf; then
+      sudo bash -c "echo 'Listen 453' >> /etc/apache2/ports.conf"
+    fi
 fi
 if ! grep -q 'Listen 90' /etc/apache2/ports.conf; then
   sudo bash -c "echo 'Listen 90' >> /etc/apache2/ports.conf"
@@ -254,8 +330,10 @@ fi
 # Alte Sites deaktivieren, neue aktivieren
 sudo a2dissite 000-default.conf 2>/dev/null || true
 sudo a2dissite solarmanager.conf 2>/dev/null || true
-sudo a2ensite solarmanager-ssl.conf
-sudo a2ensite solarmanager-api-ssl.conf
+if [ "$ssl_mode" != "none" ]; then
+    sudo a2ensite solarmanager-ssl.conf
+    sudo a2ensite solarmanager-api-ssl.conf
+fi
 sudo a2ensite solarmanager-redirect.conf
 sudo a2ensite solarmanager-api-redirect.conf
 sudo systemctl restart apache2
@@ -299,13 +377,20 @@ echo "[OK] Frontend $FRONTEND_TAG installiert."
 
 ### 84% Frontend-Konfiguration anpassen
 echo_step 84 "Frontend Backend-URL konfigurieren..."
+if [ "$ssl_mode" = "letsencrypt" ]; then
+    FRONTEND_API_URL="https://$SERVER_HOST:453/"
+elif [ "$ssl_mode" = "selfsigned" ]; then
+    FRONTEND_API_URL="https://$IP_ADDR:453/"
+else
+    FRONTEND_API_URL="http://$IP_ADDR:90/"
+fi
 sudo tee "$WEB_DIR/config.json" > /dev/null <<EOF
 {
-  "API_URL": "http://$IP_ADDR:90/",
+  "API_URL": "${FRONTEND_API_URL}",
   "APP_ENV": "production"
 }
 EOF
-echo "[OK] Frontend config.json auf 'http://$IP_ADDR:90/' gesetzt."
+echo "[OK] Frontend config.json auf '${FRONTEND_API_URL}' gesetzt."
 
 ### 85% Rechte setzen
 echo_step 85 "Setze Rechte für /var/www/html..."
@@ -389,10 +474,25 @@ echo "### Einrichtung abgeschlossen! ###"
 echo "Backend und Frontend wurden automatisch heruntergeladen und eingerichtet."
 echo ""
 echo "Zugriff:"
-echo "  Frontend:    http://$SERVER_HOST (HTTPS: https://$SERVER_HOST)"
-echo "  Backend-API: http://$SERVER_HOST:90 (HTTPS: https://$SERVER_HOST:453)"
+if [ "$ssl_mode" = "none" ]; then
+    echo "  Frontend:    http://$SERVER_HOST"
+    echo "  Backend-API: http://$SERVER_HOST:90"
+elif [ "$ssl_mode" = "letsencrypt" ]; then
+    echo "  Frontend:    https://$SERVER_HOST"
+    echo "  Backend-API: https://$SERVER_HOST:453"
+    echo "  (HTTP-Zugriff weiterhin moeglich auf Port 80/90)"
+else
+    echo "  Frontend:    https://$SERVER_HOST (HTTP: http://$SERVER_HOST)"
+    echo "  Backend-API: https://$SERVER_HOST:453 (HTTP: http://$SERVER_HOST:90)"
+fi
 echo "  phpMyAdmin:  http://$SERVER_HOST/phpmyadmin"
 echo ""
 echo "Nuetzliche Befehle:"
 echo "  sudo systemctl restart solarmanager.service   # Backend neu starten"
 echo "  sudo systemctl status solarmanager.service     # Status pruefen"
+echo ""
+if [ "$ssl_mode" = "selfsigned" ]; then
+    echo "HINWEIS: Self-Signed-Zertifikat - Browser-Warnung beim ersten Zugriff bestaetigen."
+elif [ "$ssl_mode" = "letsencrypt" ]; then
+    echo "HINWEIS: Let's Encrypt Zertifikat wird automatisch erneuert (certbot.timer)."
+fi
