@@ -213,8 +213,7 @@ jobs:
             exit 0
           fi
 
-          BODY="## Backend Änderungen
-$BACKEND_CHANGELOG"
+          BODY=$(printf '## Backend Änderungen\n%s' "$BACKEND_CHANGELOG")
 
           gh api "repos/BBessler/Solarmanager/releases/$RELEASE_ID" \
             -X PATCH \
@@ -237,8 +236,7 @@ $BACKEND_CHANGELOG"
             exit 0
           fi
 
-          BODY="## Frontend Änderungen
-$FRONTEND_CHANGELOG"
+          BODY=$(printf '## Frontend Änderungen\n%s' "$FRONTEND_CHANGELOG")
 
           gh api "repos/BBessler/Solarmanager/releases/$RELEASE_ID" \
             -X PATCH \
