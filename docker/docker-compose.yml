@@ -6,13 +6,15 @@ services:
     container_name: solarmanager
     restart: unless-stopped
     network_mode: host
-    volumes:
-      - ./app:/app
     environment:
       - ConnectionStrings__ConnectionDb=server=127.0.0.1;database=solardb;user=${MYSQL_USER:-pi};password=${MYSQL_PASSWORD:-solarmanager};Max Pool Size=500;
       - ConnectionStrings__MySQLServer_OCPP=server=127.0.0.1;database=ocpp;user=${MYSQL_USER:-pi};password=${MYSQL_PASSWORD:-solarmanager};Max Pool Size=500;
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
+      - TZ=${TZ:-Europe/Berlin}
+    volumes:
+      - ./app:/app
+      - /etc/localtime:/etc/localtime:ro
 
   caddy:
     image: caddy:2-alpine
@@ -26,11 +28,13 @@ services:
     environment:
       - SERVER_HOST=${SERVER_HOST:-localhost}
       - SERVER_IP=${SERVER_IP:-}
+      - TZ=${TZ:-Europe/Berlin}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
       - ./app/wwwroot:/srv/wwwroot:ro
+      - /etc/localtime:/etc/localtime:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -43,10 +47,13 @@ services:
     ports:
       - "9443:9443"
     command: --admin-password-file /tmp/portainer_password
+    environment:
+      - TZ=${TZ:-Europe/Berlin}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portainer-data:/data
       - ./portainer_password:/tmp/portainer_password:ro
+      - /etc/localtime:/etc/localtime:ro
 
 networks:
   solarmanager-net:

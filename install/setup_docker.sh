@@ -669,14 +669,38 @@ fi
 SERVER_IP=$(hostname -I | awk '{print $1}')
 echo "[INFO] Erkannte IP-Adresse: $SERVER_IP"
 
+# Host-Zeitzone ermitteln (mehrere Fallbacks, damit es auf allen Distros funktioniert)
+HOST_TZ=""
+if command -v timedatectl &> /dev/null; then
+    HOST_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || true)
+fi
+if [ -z "$HOST_TZ" ] && [ -f /etc/timezone ]; then
+    HOST_TZ=$(cat /etc/timezone 2>/dev/null | tr -d '[:space:]')
+fi
+if [ -z "$HOST_TZ" ] && [ -L /etc/localtime ]; then
+    HOST_TZ=$(readlink -f /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+fi
+if [ -z "$HOST_TZ" ]; then
+    HOST_TZ="Europe/Berlin"
+    echo "[WARNUNG] Host-Zeitzone konnte nicht ermittelt werden. Verwende Fallback: $HOST_TZ"
+else
+    echo "[INFO] Erkannte Host-Zeitzone: $HOST_TZ"
+fi
+
 # .env erstellen/aktualisieren
 cp .env.example .env
 sed -i "s|^SERVER_HOST=.*|SERVER_HOST=$hostname|" .env
 sed -i "s|^SERVER_IP=.*|SERVER_IP=$SERVER_IP|" .env
 sed -i "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=$db_password|" .env
 sed -i "s|^MYSQL_PASSWORD=.*|MYSQL_PASSWORD=$db_password|" .env
+# TZ in .env setzen (oder anhaengen falls Zeile fehlt)
+if grep -q "^TZ=" .env; then
+    sed -i "s|^TZ=.*|TZ=$HOST_TZ|" .env
+else
+    echo "TZ=$HOST_TZ" >> .env
+fi
 
-echo "[OK] Konfiguration in $INSTALL_DIR/.env gespeichert."
+echo "[OK] Konfiguration in $INSTALL_DIR/.env gespeichert (TZ=$HOST_TZ)."
 
 # Portainer Admin-Passwort setzen (Klartext, wird von Portainer intern gehasht)
 echo "[INFO] Setze Portainer Admin-Passwort..."

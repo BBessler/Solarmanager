@@ -1,10 +1,10 @@
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 
-# Python fuer BMW/Hyundai-Scripts
+# Python fuer BMW/Hyundai-Scripts, tzdata fuer Zeitzonen-Unterstuetzung
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv python3-dev \
-        curl jq \
+        curl jq tzdata \
         gcc g++ make \
         libjpeg62-turbo-dev zlib1g-dev libffi-dev \
     && ln -sf /usr/bin/python3 /usr/bin/python \
@@ -14,6 +14,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/venv/bin:$PATH"
+
+# Default-Zeitzone (wird von docker-compose via TZ env var ueberschrieben)
+ENV TZ=Europe/Berlin
 
 WORKDIR /app
 EXPOSE 8080

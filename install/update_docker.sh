@@ -39,6 +39,28 @@ fi
 
 cd "$INSTALL_DIR"
 
+# Host-Zeitzone mit .env synchronisieren (falls sich die System-TZ geaendert hat
+# oder die TZ-Zeile in aelteren .env-Dateien fehlt)
+if [ -f "$INSTALL_DIR/.env" ]; then
+    HOST_TZ=""
+    if command -v timedatectl &> /dev/null; then
+        HOST_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || true)
+    fi
+    if [ -z "$HOST_TZ" ] && [ -f /etc/timezone ]; then
+        HOST_TZ=$(cat /etc/timezone 2>/dev/null | tr -d '[:space:]')
+    fi
+    if [ -z "$HOST_TZ" ] && [ -L /etc/localtime ]; then
+        HOST_TZ=$(readlink -f /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+    fi
+    if [ -n "$HOST_TZ" ]; then
+        if grep -q "^TZ=" "$INSTALL_DIR/.env"; then
+            sed -i "s|^TZ=.*|TZ=$HOST_TZ|" "$INSTALL_DIR/.env"
+        else
+            echo "TZ=$HOST_TZ" >> "$INSTALL_DIR/.env"
+        fi
+    fi
+fi
+
 echo "### Solarmanager Docker Update ($CHANNEL) ###"
 echo ""
 
