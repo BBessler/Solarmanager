@@ -157,27 +157,19 @@ if [ "$BACKEND_CHANGED" = true ]; then
         cp /app/appsettings.json "$STAGING_DIR/app/appsettings.json"
     fi
 
-    # WICHTIG: Builds ohne --validate-config-Support (vor Backend-Commit 469fdd6)
-    # starten beim Flag normal als Web-Server. Wir behandeln Timeout/exit-ohne-OK
-    # als "Flag-Support nicht vorhanden" und überspringen Pre-Flight — keine
-    # falsch-positiven Update-Aborts beim ersten Übergang. Health-Check nach
-    # Container-Restart ist dann das Sicherheitsnetz.
     echo "[INFO] Pre-Flight: validiere neuen Build (--validate-config)..."
-    VALIDATE_OUTPUT=$(cd "$STAGING_DIR/app" && timeout 8 dotnet Solarmanager.dll --validate-config 2>&1)
-    VALIDATE_RC=$?
-
-    if [ "$VALIDATE_RC" -eq 0 ] && echo "$VALIDATE_OUTPUT" | grep -q "VALIDATE_OK"; then
-        echo "[OK] Pre-Flight bestanden."
-    elif [ "$VALIDATE_RC" -eq 0 ] || [ "$VALIDATE_RC" -eq 124 ] || [ "$VALIDATE_RC" -eq 143 ]; then
-        echo "[INFO] Build kennt --validate-config noch nicht — Pre-Flight übersprungen."
-    elif echo "$VALIDATE_OUTPUT" | grep -q "VALIDATE_FAILED"; then
-        echo "[FEHLER] Pre-Flight hat VALIDATE_FAILED gemeldet — neuer Build wird NICHT übernommen:"
+    VALIDATE_OUTPUT=$(cd "$STAGING_DIR/app" && timeout 30 dotnet Solarmanager.dll --validate-config 2>&1) || {
+        echo "[FEHLER] Pre-Flight fehlgeschlagen — neuer Build wird NICHT übernommen:"
         echo "$VALIDATE_OUTPUT" | sed 's/^/    /'
         exit 1
-    else
-        echo "[WARN] Pre-Flight liefert unerwarteten Exit ($VALIDATE_RC) — übersprungen."
-        echo "$VALIDATE_OUTPUT" | sed 's/^/    /' | head -10
+    }
+
+    if ! echo "$VALIDATE_OUTPUT" | grep -q "VALIDATE_OK"; then
+        echo "[FEHLER] Pre-Flight lieferte unerwartete Ausgabe — neuer Build wird NICHT übernommen:"
+        echo "$VALIDATE_OUTPUT" | sed 's/^/    /'
+        exit 1
     fi
+    echo "[OK] Pre-Flight bestanden."
 fi
 
 # Backup für Notfall-Rollback nach Restart (falls trotz Pre-Flight etwas crasht).

@@ -155,47 +155,32 @@ if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_TAG" ]; then
 fi
 
 # 1b. Pre-Flight: neuen Build mit --validate-config gegen DI/DB testen, BEVOR
-#     der laufende Service gestoppt wird. Spart Downtime bei kaputten Builds.
-#
-# WICHTIG: Builds OHNE --validate-config-Support (vor Backend-Commit 469fdd6)
-# ignorieren das Flag und versuchen normal als Web-Server zu starten — das
-# kollidiert mit dem laufenden Service (Port 5000, gemeinsame DB-Tabellen).
-# Wir erkennen das Flag-Support per kurzem Probelauf mit sehr knappem Timeout
-# und überspringen Pre-Flight, wenn der Build es nicht kennt. Health-Check
-# nach Service-Start ist dann das Sicherheitsnetz.
+#     der laufende Service gestoppt wird. Spart Downtime bei kaputten Builds —
+#     ohne Pre-Flight: stop → swap → start → 60 s Health-Wait → Rollback (~2 min Downtime).
+#     Mit Pre-Flight: validate (~5 s) → wenn KO, alter Service läuft ungestört weiter.
+#     Wir kopieren appsettings.json vom aktuellen Symlink-Ziel in den neuen Ordner,
+#     damit DB-Connection-Strings für den Validate-Lauf verfügbar sind.
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$NEW_BACKEND" ] && command -v dotnet &> /dev/null; then
     if [ -f "$WEB_DIR/backend/appsettings.json" ] && [ ! -f "$NEW_BACKEND/appsettings.json" ]; then
         sudo cp "$WEB_DIR/backend/appsettings.json" "$NEW_BACKEND/appsettings.json"
     fi
 
     echo "[INFO] Pre-Flight: validiere neuen Build (--validate-config)..."
-    # Probelauf mit 8 s Timeout — VALIDATE_OK kommt bei modernen Builds in <2 s.
-    # Bei alten Builds ohne Flag-Support startet dotnet einen Web-Server, der
-    # nach 8 s gekillt wird (exit 124) — wir behandeln das als "kein Support",
-    # NICHT als Pre-Flight-Fehler.
-    VALIDATE_OUTPUT=$(cd "$NEW_BACKEND" && timeout 8 sudo -u pi dotnet Solarmanager.dll --validate-config 2>&1)
-    VALIDATE_RC=$?
-
-    if [ "$VALIDATE_RC" -eq 0 ] && echo "$VALIDATE_OUTPUT" | grep -q "VALIDATE_OK"; then
-        echo "[OK] Pre-Flight bestanden."
-    elif [ "$VALIDATE_RC" -eq 0 ] || [ "$VALIDATE_RC" -eq 124 ] || [ "$VALIDATE_RC" -eq 143 ]; then
-        # Exit 0 ohne VALIDATE_OK ODER Timeout (124/143) → Build kennt das Flag nicht
-        echo "[INFO] Build kennt --validate-config noch nicht — Pre-Flight übersprungen."
-        echo "       Health-Check nach Start ist das Sicherheitsnetz."
-    elif echo "$VALIDATE_OUTPUT" | grep -q "VALIDATE_FAILED"; then
-        # Build kennt das Flag UND hat aktiv FAILED gemeldet → echter Pre-Flight-Fail
-        echo "[FEHLER] Pre-Flight hat VALIDATE_FAILED gemeldet — neuer Build wird verworfen:"
+    VALIDATE_OUTPUT=$(cd "$NEW_BACKEND" && timeout 30 sudo -u pi dotnet Solarmanager.dll --validate-config 2>&1) || {
+        echo "[FEHLER] Pre-Flight fehlgeschlagen — neuer Build wird verworfen, alte Version läuft weiter:"
         echo "$VALIDATE_OUTPUT" | sed 's/^/    /'
         sudo rm -rf "$NEW_BACKEND"
         [ -n "$NEW_FRONTEND" ] && sudo rm -rf "$NEW_FRONTEND"
         exit 1
-    else
-        # Unbekannter Exit-Code ohne VALIDATE_FAILED — sicherheitshalber als Skip
-        # behandeln, damit ein alter Build mit komischen Fehlerexits den Update
-        # nicht blockiert. Health-Check fängt echte Probleme nach Start ab.
-        echo "[WARN] Pre-Flight liefert unerwarteten Exit ($VALIDATE_RC) — übersprungen."
-        echo "$VALIDATE_OUTPUT" | sed 's/^/    /' | head -10
+    }
+    if ! echo "$VALIDATE_OUTPUT" | grep -q "VALIDATE_OK"; then
+        echo "[FEHLER] Pre-Flight lieferte unerwartete Ausgabe — neuer Build wird verworfen:"
+        echo "$VALIDATE_OUTPUT" | sed 's/^/    /'
+        sudo rm -rf "$NEW_BACKEND"
+        [ -n "$NEW_FRONTEND" ] && sudo rm -rf "$NEW_FRONTEND"
+        exit 1
     fi
+    echo "[OK] Pre-Flight bestanden."
 fi
 
 # 2. .NET prüfen/installieren (nur falls Backend-Update)
