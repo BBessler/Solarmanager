@@ -23,17 +23,13 @@ done
 APP_DIR="/app"
 VERSION_FILE="/app/.solarmanager_versions"
 
-# Shared Library laden — IMMER frisch ziehen, sonst kennt eine alte gecachte
-# Version (aus vorigem Update-Lauf) neue Funktionen nicht.
+# Shared Library laden
 LIB_DIR="$(dirname "$0")"
-LIB_FILE="$LIB_DIR/lib_solarmanager.sh"
-if ! curl -fsSL --max-time 30 \
-    "https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh" \
-    -o "$LIB_FILE"; then
-    echo "[FEHLER] lib_solarmanager.sh konnte nicht von GitHub geladen werden."
-    exit 1
+if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
+    curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh" \
+        -o "$LIB_DIR/lib_solarmanager.sh"
 fi
-. "$LIB_FILE"
+. "$LIB_DIR/lib_solarmanager.sh"
 
 echo "### Solarmanager Container-Update ($CHANNEL) ###"
 echo ""
