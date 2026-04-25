@@ -90,31 +90,139 @@ fi
 
 echo "[AUTO] Update wird durchgefuehrt..."
 
-# Backend aktualisieren
+# Pre-Flight-Validierung absichert: neue Builds werden in /app/staging/ entpackt,
+# dort gegen --validate-config geprüft (DI-Graph + DB-Verbindung), und nur bei
+# Erfolg per rsync atomar nach /app übernommen. Schlägt die Validierung fehl,
+# wird das Staging-Verzeichnis gelöscht — der laufende Container bleibt unangetastet.
+STAGING_DIR="/app/staging-$(date +%s)"
+BACKUP_DIR="/app/.backup-$(date +%Y%m%d_%H%M%S)"
+
+cleanup_staging() {
+    rm -rf "$STAGING_DIR"
+}
+trap cleanup_staging EXIT
+
+# Backend ins Staging entpacken
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_URL" ]; then
-    echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-    sm_download_and_extract "$LATEST_BACKEND_URL" "$APP_DIR" || exit 1
+    echo "[INFO] Backend deployen (Staging): $LATEST_BACKEND_TAG..."
+    mkdir -p "$STAGING_DIR/app"
+    BACKEND_TMP=$(sm_download_validated "$LATEST_BACKEND_URL") || exit 1
+    if ! tar --no-same-owner -xzf "$BACKEND_TMP" -C "$STAGING_DIR/app"; then
+        echo "[FEHLER] Backend-Extract fehlgeschlagen."
+        rm -f "$BACKEND_TMP"
+        exit 1
+    fi
+    rm -f "$BACKEND_TMP"
+
     # .NET 9 Static-Web-Assets-Manifest entfernen (Frontend wird separat deployed)
-    rm -f "$APP_DIR/Solarmanager.staticwebassets.endpoints.json"
-    echo "[OK] Backend aktualisiert."
+    rm -f "$STAGING_DIR/app/Solarmanager.staticwebassets.endpoints.json"
+
+    if [ ! -f "$STAGING_DIR/app/Solarmanager.dll" ]; then
+        echo "[FEHLER] Solarmanager.dll fehlt im Backend-Archiv."
+        exit 1
+    fi
 fi
 
-# Frontend aktualisieren
+# Frontend ins Staging entpacken
 if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_URL" ]; then
-    echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
+    echo "[INFO] Frontend deployen (Staging): $LATEST_FRONTEND_TAG..."
+    mkdir -p "$STAGING_DIR/wwwroot"
+    FRONTEND_TMP=$(sm_download_validated "$LATEST_FRONTEND_URL") || exit 1
+    if ! tar --no-same-owner -xzf "$FRONTEND_TMP" -C "$STAGING_DIR/wwwroot"; then
+        echo "[FEHLER] Frontend-Extract fehlgeschlagen."
+        rm -f "$FRONTEND_TMP"
+        exit 1
+    fi
+    rm -f "$FRONTEND_TMP"
 
-    sm_download_and_extract "$LATEST_FRONTEND_URL" "$APP_DIR/wwwroot" || exit 1
-
-    # config.json generieren (relative URL - funktioniert mit Hostname und IP)
-    cat > "$APP_DIR/wwwroot/config.json" <<CFGEOF
+    cat > "$STAGING_DIR/wwwroot/config.json" <<CFGEOF
 {
   "API_URL": "/",
   "APP_ENV": "production"
 }
 CFGEOF
-    echo "[OK] config.json generiert."
-    echo "[OK] Frontend aktualisiert."
 fi
+
+# Pre-Flight: das neue Backend gegen --validate-config laufen lassen.
+# Lädt DI-Graph + öffnet DB-Verbindung, ohne Server-Listener zu starten.
+# Bei Erfolg: "VALIDATE_OK" auf stdout, exit 0.
+# Wir kopieren appsettings.json aus dem laufenden /app, damit DB-Connection
+# und Konfiguration für den Validate-Lauf zur Verfügung stehen.
+if [ "$BACKEND_CHANGED" = true ]; then
+    if [ -f "/app/appsettings.json" ] && [ ! -f "$STAGING_DIR/app/appsettings.json" ]; then
+        cp /app/appsettings.json "$STAGING_DIR/app/appsettings.json"
+    fi
+
+    echo "[INFO] Pre-Flight: validiere neuen Build (--validate-config)..."
+    VALIDATE_OUTPUT=$(cd "$STAGING_DIR/app" && timeout 30 dotnet Solarmanager.dll --validate-config 2>&1) || {
+        echo "[FEHLER] Pre-Flight fehlgeschlagen — neuer Build wird NICHT übernommen:"
+        echo "$VALIDATE_OUTPUT" | sed 's/^/    /'
+        exit 1
+    }
+
+    if ! echo "$VALIDATE_OUTPUT" | grep -q "VALIDATE_OK"; then
+        echo "[FEHLER] Pre-Flight lieferte unerwartete Ausgabe — neuer Build wird NICHT übernommen:"
+        echo "$VALIDATE_OUTPUT" | sed 's/^/    /'
+        exit 1
+    fi
+    echo "[OK] Pre-Flight bestanden."
+fi
+
+# Backup für Notfall-Rollback nach Restart (falls trotz Pre-Flight etwas crasht).
+# Nur die Dinge, die wir gleich überschreiben — nicht das ganze /app.
+echo "[INFO] Backup laufender Version → $BACKUP_DIR"
+mkdir -p "$BACKUP_DIR"
+if [ "$BACKEND_CHANGED" = true ]; then
+    # Nur Backend-Dateien (alles in /app außer wwwroot, staging, backups)
+    find /app -maxdepth 1 -mindepth 1 \
+        ! -name 'wwwroot' \
+        ! -name 'staging-*' \
+        ! -name '.backup-*' \
+        -exec cp -a {} "$BACKUP_DIR/" \;
+fi
+if [ "$FRONTEND_CHANGED" = true ] && [ -d /app/wwwroot ]; then
+    cp -a /app/wwwroot "$BACKUP_DIR/wwwroot"
+fi
+
+# Übernahme: Staging → /app (rsync mit --delete für saubere Backend-Ablage,
+# Frontend nur überschreibend ohne --delete, damit eventuell zusätzliche
+# Static-Files aus dem Mount erhalten bleiben).
+if [ "$BACKEND_CHANGED" = true ]; then
+    echo "[INFO] Übernehme Backend-Dateien nach /app..."
+    if command -v rsync &> /dev/null; then
+        rsync -a --delete \
+            --exclude='/wwwroot' \
+            --exclude='/staging-*' \
+            --exclude='/.backup-*' \
+            --exclude='appsettings.json' \
+            "$STAGING_DIR/app/" /app/
+    else
+        # Fallback ohne rsync: alte Backend-Files (ausser wwwroot/staging/backups) löschen + kopieren
+        find /app -maxdepth 1 -mindepth 1 \
+            ! -name 'wwwroot' \
+            ! -name 'staging-*' \
+            ! -name '.backup-*' \
+            ! -name 'appsettings.json' \
+            -exec rm -rf {} +
+        cp -a "$STAGING_DIR/app/." /app/
+    fi
+    echo "[OK] Backend übernommen."
+fi
+
+if [ "$FRONTEND_CHANGED" = true ]; then
+    echo "[INFO] Übernehme Frontend-Dateien nach /app/wwwroot..."
+    mkdir -p /app/wwwroot
+    if command -v rsync &> /dev/null; then
+        rsync -a --delete "$STAGING_DIR/wwwroot/" /app/wwwroot/
+    else
+        rm -rf /app/wwwroot
+        cp -a "$STAGING_DIR/wwwroot" /app/wwwroot
+    fi
+    echo "[OK] Frontend übernommen."
+fi
+
+# Alte Backups aufräumen — nur die letzten 3 behalten
+ls -1dt /app/.backup-*/ 2>/dev/null | tail -n +4 | xargs -r rm -rf
 
 # Versionsdatei schreiben
 cat > "$VERSION_FILE" <<EOF
@@ -123,7 +231,7 @@ INSTALLED_FRONTEND="$LATEST_FRONTEND_TAG"
 EOF
 echo "[OK] Versionsdatei aktualisiert."
 
-# Anwendung beenden - Docker restart-policy startet den Container neu
+# trap räumt staging weg, danach Container-Restart triggern
 echo "[INFO] Starte Anwendung neu..."
 echo "### Update abgeschlossen! ###"
 kill -TERM 1
