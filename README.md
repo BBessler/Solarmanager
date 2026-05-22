@@ -18,25 +18,18 @@ Energiemanagementsystem zur intelligenten Steuerung von PV-Anlagen, Wallboxen, B
 
 ## Funktionen
 
-- **PV-Steuerung & Eigenverbrauch** — automatische Verteilung des PV-Überschusses auf Akku, Wallbox, Heizung und Smart-Home-Verbraucher
-- **Lade-Prioritäten** — konfigurierbare Reihenfolge wer zuerst PV bekommt (z.B. Auto → Akku → Heizung)
-- **PV-Prognose** — eigene ML-basierte Prognose (intern) oder externe Anbieter, Mischmodus mit Fallback
-- **Wettervorhersage** — Sonnenauf-/untergang, Bewölkungsgrad, Temperatur (Multi-Modell)
-- **§ 51 EEG / Solarspitzengesetz** — automatisches Umlenken des PV-Überschusses in Akku/Heizung/Wallbox bei negativem Spotpreis, separate Statistik-Ausweisung der unvergüteten Einspeisung
-- **Netzdienliches Laden** — Klassifikation der Tagesstunden in günstig/teuer, konzentriertes Laden in günstigen PV-Peak-Stunden, aggressiveres Akku-Entladen in teuren Stunden
-- **Preissteuerungs-Plan** — 7-Tage-Vorschau pro Stunde mit Wallbox-, Akku- und Heizungs-Aktionen
-- **Wallbox-Ladealgorithmen** — Verbrauch / Sonne / Sonne (max) / Prognose – mit Phasenwechsel-Logik und Backward-Planning bis zum Ladeziel
-- **Auto-Kalender** — Termine mit Abfahrt + Ladelimit, der Solarmanager lädt rechtzeitig voll (auch mit Netzbezug bei variablem Tarif)
-- **Akku-Steuerung** — Lade-/Entlade-Optimierung, Notladung, Spätlade-Uhr, Hold/Sperren-Steuerung für viele Modelle
-- **Heizungs-Steuerung** — Wärmepumpen, Heizstäbe, Klimaanlagen über PV-Überschuss, mit Heizungsunterstützung und WW-Komfort-Logik (Sonntag/Feiertag)
-- **Verbraucherprognose** — Mehrtages-Fenster für Großverbraucher (Waschmaschine, Spülmaschine, …) mit realistischer PV-Reserve
-- **Smart Home** — Schalter, Dimmer, Energiezähler, Räume/Etagen mit Grundrissen, Szenen
-- **Statistik & Auswertung** — Tagesvergleiche, Monatsverläufe, kWh und Kosten pro Verbraucher/Heizung, vermiedenes CO2, Auto-Reichweite, Kosten/100 km
-- **Simulation (Ladetag)** — interaktive Simulation kompletter Ladetage mit verschiedenen PV-Quellen und Modi
-- **Push-Benachrichtigungen** — Web Push für PV-Ausfall, Wallbox-Fehler, Auto fertig, Speicher voll
-- **Setup-Wizard** — geführte Ersteinrichtung aller Bereiche
-- **Historischer Datenimport** — PV- und Wallbox-Daten rückwirkend importieren
-- **Bundesland-spezifische Feiertage** — für regionale Brückentag-Erkennung im Backward-Planning
+- **PV-Steuerung & Eigenverbrauch** — automatische Verteilung des PV-Überschusses auf Akku, Wallbox, Heizung und Smart-Home-Verbraucher; konfigurierbare Lade-Prioritäten
+- **Wallbox-Steuerung** — Lademodi Verbrauch / Sonne / Sonne (max) / Prognose, automatischer Phasenwechsel, Auto-Kalender mit Abfahrtszeit und Ladelimit
+- **Akku-Steuerung** — Lade-/Entlade-Optimierung, Notladung, Hold/Sperren-Steuerung für gängige Hybrid-Modelle
+- **Heizungs-Steuerung** — Wärmepumpen, Heizstäbe und Klimaanlagen über PV-Überschuss, mit Heizungsunterstützung und WW-Komfort-Logik
+- **PV-Prognose & Wettervorhersage** — eigene ML-Prognose oder externer Anbieter (Mischmodus mit Fallback)
+- **Verbraucherprognose** — Großverbraucher (Waschmaschine, Spülmaschine, …) in den passenden PV-Zeitraum legen
+- **Preisbasierte Steuerung** — dynamische Tarife (Tibber, aWATTar), § 51 EEG-Nullvergütung, Netzdienliches Laden mit 7-Tage-Plan-Vorschau
+- **Smart Home** — Shelly-Geräte, MQTT, Räume/Etagen mit Grundrissen, Szenen
+- **Statistik & Auswertung** — Tages-/Monats-/Jahresvergleiche, kWh und Kosten pro Verbraucher, CO2-Bilanz, Auto-Reichweite & Kosten/100 km
+- **Simulation (Ladetag)** — interaktive Simulation eines kompletten Ladetags
+- **Push-Benachrichtigungen** — Web Push bei PV-Ausfall, Wallbox-Fehler, Auto fertig, Speicher voll
+- **Setup-Wizard** — geführte Ersteinrichtung
 
 ---
 
@@ -53,8 +46,6 @@ Energiemanagementsystem zur intelligenten Steuerung von PV-Anlagen, Wallboxen, B
 | **PV-Prognose** | Solcast, Solarmanager-intern (ML.NET) |
 | **Stromanbieter** | Tibber, aWATTar (Spotpreis-Fallback ohne Login) |
 | **Wetter** | Open-Meteo |
-
-Vollständige API-Dokumentation: Swagger UI unter `/swagger` im Development-Modus.
 
 ---
 
