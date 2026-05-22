@@ -111,21 +111,6 @@ PV- und Wallbox-Daten rückwirkend aus externen Quellen importieren (PV: SunSpec
 
 ---
 
-## API-Endpoints (Auszug)
-
-| Endpoint | Beschreibung |
-|----------|-------------|
-| `GET /Preissteuerung/Plan` | 7-Tage-Plan mit Klassifikation + erwarteter Wallbox/Akku/Heizungs-Leistung pro Stunde |
-| `GET /AutoKalender` | Termine mit Abfahrt + Ladelimit |
-| `GET /HomeBaseOptionHomebase` | HomeBase-Stammdaten inkl. Bundesland + Counts pro Kategorie |
-| `PUT /Basiswert` | Schwellenwerte & Feintuning ändern (Cache-Invalidierung automatisch) |
-| `GET /Simulation/Ladetag` | Sim-Lauf für einen kompletten Tag mit Modus/PV-Quelle |
-| `POST /PushSubscription` | Web Push-Subscription registrieren |
-
-Vollständige API-Dokumentation: Swagger UI unter `/swagger` im Development-Modus.
-
----
-
 ## Installation & Dokumentation
 
 Die vollständige Installationsanleitung findest du im **[Wiki](https://github.com/BBessler/Solarmanager/wiki)**:
