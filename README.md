@@ -20,13 +20,14 @@ Energiemanagementsystem zur intelligenten Steuerung von PV-Anlagen, Wallboxen, B
 
 - **PV-Steuerung & Eigenverbrauch** — automatische Verteilung des PV-Überschusses auf Akku, Wallbox, Heizung und Smart-Home-Verbraucher; konfigurierbare Lade-Prioritäten
 - **Wallbox-Steuerung** — Lademodi Verbrauch / Sonne / Sonne (max) / Prognose, automatischer Phasenwechsel, Auto-Kalender mit Abfahrtszeit und Ladelimit
-- **Akku-Steuerung** — Lade-/Entlade-Optimierung, Notladung, Hold/Sperren-Steuerung für gängige Hybrid-Modelle
+- **Akku-Steuerung** — Lade-/Entlade-Optimierung, Notladung, Hold/Sperren-Steuerung für gängige Hybrid-Modelle; optionale Akku-Entladung für Heizstab/Warmwasser und Wallbox mit automatischer, am Nachtverbrauch orientierter SoC-Untergrenze
 - **Heizungs-Steuerung** — Wärmepumpen, Heizstäbe und Klimaanlagen über PV-Überschuss, mit Heizungsunterstützung und WW-Komfort-Logik
 - **PV-Prognose & Wettervorhersage** — eigene ML-Prognose oder externer Anbieter (Mischmodus mit Fallback)
 - **Verbraucherprognose** — Großverbraucher (Waschmaschine, Spülmaschine, …) in den passenden PV-Zeitraum legen
 - **Preisbasierte Steuerung** — dynamische Tarife (Tibber, aWATTar), § 51 EEG-Nullvergütung, Netzdienliches Laden mit 7-Tage-Plan-Vorschau
 - **Smart Home** — Shelly-Geräte, MQTT, Räume/Etagen mit Grundrissen, Szenen
 - **Statistik & Auswertung** — Tages-/Monats-/Jahresvergleiche, kWh und Kosten pro Verbraucher, CO2-Bilanz, Auto-Reichweite & Kosten/100 km
+- **Individuelle Dashboards (Boards)** — frei konfigurierbare Widget-Boards mit Drag & Drop, eigenem Stil-Editor und geräteübergreifender Synchronisation
 - **Simulation (Ladetag)** — interaktive Simulation eines kompletten Ladetags
 - **Push-Benachrichtigungen** — Web Push bei PV-Ausfall, Wallbox-Fehler, Auto fertig, Speicher voll
 - **Setup-Wizard** — geführte Ersteinrichtung
