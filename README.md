@@ -41,7 +41,7 @@ Energiemanagementsystem zur intelligenten Steuerung von PV-Anlagen, Wallboxen, B
 | **PV-Wechselrichter** | Huawei (Modbus / FusionSolar), SMA, SunSpec, Fronius, Kostal Plenticore, GoodWe, SolarEdge, Growatt, LG ESS Home, Shelly (BKW), Solaranzeige |
 | **Wallboxen** | go-eCharger, Easee, OCPP 1.6/2.0, SunSpec (Modbus), Keba, Fronius Wattpilot, Mennekes, Webasto, Hardy Barth, Heidelberg |
 | **Batteriespeicher** | Marstek, Huawei, SMA, SunSpec (Modell 124), LG ESS, Ecoflow |
-| **Elektrofahrzeuge** | Tesla, BMW, Hyundai, Kia, VW, Audi, Skoda, Seat/Cupra, Mercedes, Opel, Peugeot, Citroën, DS, Renault, Manuell |
+| **Elektrofahrzeuge** | Tesla, BMW, Hyundai, Kia, Mercedes, Opel, Peugeot, Citroën, DS, Renault, Manuell |
 | **Smart Home** | Shelly (Schalter, Dimmer, Energiezähler, Thermostat), MQTT |
 | **Heizung / Wärmepumpe** | Heizstab (via Shelly), Buderus KM200, LG ThinQ Connect (Therma V), Vaillant, Splitklima, Gas-Heizung |
 | **PV-Prognose** | Solcast, Solarmanager-intern (ML.NET) |
