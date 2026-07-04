@@ -1,6 +1,8 @@
-# Solarmanager
+# Solarmanager – PV-Überschussladen & Energiemanagement für dein Zuhause
 
-Energiemanagementsystem zur intelligenten Steuerung von PV-Anlagen, Wallboxen, Batteriespeichern und Fahrzeugladung.
+**E-Auto, Batteriespeicher, Heizstab und Wärmepumpe mit eigenem Solarstrom laden:** Der Solarmanager misst laufend Erzeugung und Verbrauch deiner Photovoltaik-Anlage und verteilt den PV-Überschuss automatisch auf Wallbox, Speicher, Heizung und Smart-Home-Verbraucher. Läuft lokal auf dem Raspberry Pi oder per Docker – ohne Cloud-Zwang, ohne Abogebühren.
+
+🌐 **[solarmanager.online](http://solarmanager.online)** · 📖 **[Installation (Wiki)](https://github.com/BBessler/Solarmanager/wiki)** · 🔌 **[Unterstützte Geräte](http://solarmanager.online/geraete.html)**
 
 ![Dashboard](images/Dashboard.jpg)
 
