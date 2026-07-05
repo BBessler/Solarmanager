@@ -194,9 +194,13 @@ jobs:
           fi
 
       # 6. Release-Notes mit Changelog aktualisieren
+      # Changelog per env uebergeben (NICHT per ${{ }} ins Skript interpolieren):
+      # Commit-Titel mit Anführungszeichen/&/Backticks brechen sonst das Shell-Quoting
+      # (Beta-Run 04.07.: exit 127 durch 'Modul "Preissteuerung" → "PreisNetz"').
       - name: Backend-Release-Notes aktualisieren
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          BACKEND_CHANGELOG: ${{ steps.backend_commits.outputs.changelog }}
         run: |
           VERSION=$(date +'%Y.%m.%d')
           TAG="beta-backend-$VERSION"
@@ -208,10 +212,7 @@ jobs:
             exit 0
           fi
 
-          BODY="## Beta Backend Änderungen
-          ${{ steps.backend_commits.outputs.changelog }}"
-
-          BODY=$(echo "$BODY" | sed 's/^          //')
+          BODY=$(printf '## Beta Backend Änderungen\n%s' "$BACKEND_CHANGELOG")
 
           gh api "repos/BBessler/Solarmanager/releases/$RELEASE_ID" \
             -X PATCH \
@@ -222,6 +223,7 @@ jobs:
       - name: Frontend-Release-Notes aktualisieren
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          FRONTEND_CHANGELOG: ${{ steps.frontend_commits.outputs.changelog }}
         run: |
           VERSION=$(date +'%Y.%m.%d')
           TAG="beta-frontend-$VERSION"
@@ -233,10 +235,7 @@ jobs:
             exit 0
           fi
 
-          BODY="## Beta Frontend Änderungen
-          ${{ steps.frontend_commits.outputs.changelog }}"
-
-          BODY=$(echo "$BODY" | sed 's/^          //')
+          BODY=$(printf '## Beta Frontend Änderungen\n%s' "$FRONTEND_CHANGELOG")
 
           gh api "repos/BBessler/Solarmanager/releases/$RELEASE_ID" \
             -X PATCH \
@@ -245,12 +244,15 @@ jobs:
           echo "Beta-Frontend-Release-Notes aktualisiert"
 
       - name: Zusammenfassung
+        env:
+          BACKEND_CHANGELOG: ${{ steps.backend_commits.outputs.changelog }}
+          FRONTEND_CHANGELOG: ${{ steps.frontend_commits.outputs.changelog }}
         run: |
           VERSION=$(date +'%Y.%m.%d')
           echo "## Beta Release $VERSION abgeschlossen" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Backend Änderungen" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.backend_commits.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+          echo "$BACKEND_CHANGELOG" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Frontend Änderungen" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.frontend_commits.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+          echo "$FRONTEND_CHANGELOG" >> $GITHUB_STEP_SUMMARY
