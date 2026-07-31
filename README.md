@@ -15,6 +15,14 @@
 | ![Auswertungen](images/Auswertungen.jpg) | **Auswertungen** — Monats- und Jahresvergleiche von PV-Leistung, Bezug, Einspeisung und Verbrauch |
 | ![Simulation](images/Simulation.jpg) | **Simulation** — Ladesimulation mit Prognose: Wie lange dauert die Ladung bei aktuellem Wetter? |
 | ![Einstellungen](images/Einstellungen.jpg) | **Einstellungen** — Konfiguration von PV-Anlagen, Akkus, Wallboxen, Autos, Verbrauchern und Prognosen |
+| ![Wetter- & Ertragsprognose](images/WetterAnzeige_MitPV.jpg) | **Wetter- & Ertragsprognose** — 7-Tage-Wetter mit erwartetem PV-Ertrag, Tagesdetail mit Peak, Niederschlag, UV-Index und Sonnenstunden; Prognose-Kurve gegen gemessene Erzeugung |
+| ![PV-Prognose](images/PVPrognose.jpg) | **PV-Prognose (Summen)** — Tagesübersicht Ist- gegen Prognose-kWh inklusive P10-/P90-Bandbreite zur Bewertung der Prognosegüte |
+| ![Verbraucherprognose](images/Prognose_Verbraucher_PV.jpg) | **Verbraucherprognose** — beste Startzeit für Herd, Kaffeemaschine, Spülmaschine, Waschmaschine & Co. im Startfenster, Laufzeit und Teildeckung entlang der PV-Kurve |
+| ![Strompreise](images/Strompreise.jpg) | **Strompreise** — stündlicher Verlauf aus Arbeitspreis und sonstigen Kosten mit Ø-Linien und Jetzt-Marker |
+| ![Netzdienliches Laden](images/NetzdienlichesLaden.jpg) | **Preis & Netz – Plan-Vorschau** — stündlicher Plan über mehrere Tage: was Wallbox, Akku und Heizung tun, mit Preisklassifikation (günstig/normal/teuer), § 51 EEG und Lade-Ziel |
+| ![Hochrechnung](images/HochrechnungAnhandDerzeitiegerDaten.jpg) | **Hochrechnung** — Jahresvergleiche inklusive Hochrechnung künftiger Jahre auf Basis der bisher gemessenen Daten |
+| ![Eigene Dashboards](images/ErzeugenEigenerDashboards.jpg) | **Eigene Dashboards (Boards)** — Widget-Katalog, Drag & Drop, Größen- und Stil-Anpassung pro Widget |
+| ![Alternatives Design](images/AlternativesDesign_Dashboard.jpg) | **Alternatives Dashboard-Design** — kompakte Kachel-Ansicht mit Energiefluss, Live-Kennzahlen und Tagesverlauf in einem Bild |
 
 ---
 
@@ -41,7 +49,7 @@
 | Kategorie | Hersteller / Protokoll |
 |-----------|------------------------|
 | **PV-Wechselrichter** | Huawei (Modbus / FusionSolar), SMA, SunSpec, Fronius, Kostal Plenticore, GoodWe, SolarEdge, Growatt, LG ESS Home, Shelly (BKW), Solaranzeige |
-| **Wallboxen** | go-eCharger, Easee, OCPP 1.6/2.0, SunSpec (Modbus), Keba, Fronius Wattpilot, Mennekes, Webasto, Hardy Barth, Heidelberg |
+| **Wallboxen** | go-eCharger, Easee, OCPP 1.6/2.0, SunSpec (Modbus), Keba, Fronius Wattpilot, Mennekes, Webasto, Hardy Barth, Heidelberg, Elli Charger 2 (baugleich ID. Charger 2, Škoda Charger, CUPRA Charger 2) |
 | **Batteriespeicher** | Marstek, Huawei, SMA, SunSpec (Modell 124), LG ESS, Ecoflow |
 | **Elektrofahrzeuge** | Tesla, BMW, Hyundai, Kia, Mercedes, Opel, Peugeot, Citroën, DS, Renault, Manuell |
 | **Smart Home** | Shelly (Schalter, Dimmer, Energiezähler, Thermostat), MQTT |
