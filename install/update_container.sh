@@ -22,6 +22,36 @@ done
 
 APP_DIR="/app"
 VERSION_FILE="/app/.solarmanager_versions"
+LOG_DIR="/var/log/solarmanager"
+LOG_FILE="$LOG_DIR/update.log"
+STATE_FILE="$LOG_DIR/update.state"
+
+# Logging: Ausgabe zusaetzlich in eine Datei, damit das Frontend den Verlauf
+# auch nach dem Neustart des Containers noch anzeigen kann.
+if ! mkdir -p "$LOG_DIR" 2>/dev/null || ! touch "$LOG_FILE" 2>/dev/null; then
+    # Container ohne Root: ausweichen statt das Update abzubrechen.
+    # Das Backend sucht die Dateien in beiden Verzeichnissen.
+    LOG_DIR="/tmp/solarmanager"
+    LOG_FILE="$LOG_DIR/update.log"
+    STATE_FILE="$LOG_DIR/update.state"
+    mkdir -p "$LOG_DIR"
+fi
+: > "$LOG_FILE"
+echo "running" > "$STATE_FILE"
+chmod 644 "$LOG_FILE" "$STATE_FILE" 2>/dev/null || true
+
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+sm_finish() {
+    local code=$1
+    sleep 1   # letzte Zeilen durch tee flushen lassen
+    if [ "$code" -eq 0 ]; then
+        echo "success" > "$STATE_FILE"
+    else
+        echo "failed" > "$STATE_FILE"
+    fi
+}
+trap 'sm_finish $?' EXIT
 
 # Shared Library laden
 LIB_DIR="$(dirname "$0")"
@@ -90,16 +120,7 @@ fi
 
 echo "[AUTO] Update wird durchgefuehrt..."
 
-# Backend aktualisieren
-if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_URL" ]; then
-    echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-    sm_download_and_extract "$LATEST_BACKEND_URL" "$APP_DIR" || exit 1
-    # .NET 9 Static-Web-Assets-Manifest entfernen (Frontend wird separat deployed)
-    rm -f "$APP_DIR/Solarmanager.staticwebassets.endpoints.json"
-    echo "[OK] Backend aktualisiert."
-fi
-
-# Frontend aktualisieren
+# Frontend zuerst: statische Dateien, beruehrt den laufenden Prozess nicht.
 if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_URL" ]; then
     echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
 
@@ -116,6 +137,16 @@ CFGEOF
     echo "[OK] Frontend aktualisiert."
 fi
 
+# Backend aktualisieren. Hier wird ueber die Dateien des laufenden Prozesses
+# entpackt - der Container startet direkt danach neu.
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_URL" ]; then
+    echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
+    sm_download_and_extract "$LATEST_BACKEND_URL" "$APP_DIR" || exit 1
+    # .NET 9 Static-Web-Assets-Manifest entfernen (Frontend wird separat deployed)
+    rm -f "$APP_DIR/Solarmanager.staticwebassets.endpoints.json"
+    echo "[OK] Backend aktualisiert."
+fi
+
 # Versionsdatei schreiben
 cat > "$VERSION_FILE" <<EOF
 INSTALLED_BACKEND="$LATEST_BACKEND_TAG"
@@ -126,4 +157,10 @@ echo "[OK] Versionsdatei aktualisiert."
 # Anwendung beenden - Docker restart-policy startet den Container neu
 echo "[INFO] Starte Anwendung neu..."
 echo "### Update abgeschlossen! ###"
+
+# Endstatus vor dem Neustart festhalten: mit PID 1 stirbt auch dieses Script,
+# der EXIT-Trap kommt dann nicht mehr zum Zug.
+sleep 1
+echo "success" > "$STATE_FILE"
+
 kill -TERM 1

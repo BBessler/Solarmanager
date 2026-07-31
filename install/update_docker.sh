@@ -140,14 +140,8 @@ else
     fi
 fi
 
-# Backend aktualisieren (nur wenn geaendert)
-if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
-    echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-    sm_download_and_extract "$LATEST_BACKEND_URL" "$INSTALL_DIR/app" || exit 1
-    echo "[OK] Backend aktualisiert."
-fi
-
-# Frontend aktualisieren (nur wenn geaendert)
+# Frontend zuerst aktualisieren (nur wenn geaendert): statische Dateien,
+# beruehrt den laufenden Container nicht.
 if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_TAG" ]; then
     echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
     sm_download_and_extract "$LATEST_FRONTEND_URL" "$INSTALL_DIR/app/wwwroot" || exit 1
@@ -161,6 +155,21 @@ if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_TAG" ]; then
 CFGEOF
     echo "[OK] config.json generiert (API_URL: /)."
     echo "[OK] Frontend aktualisiert."
+fi
+
+# Backend aktualisieren (nur wenn geaendert). Container vorher stoppen: wird
+# ueber die Dateien des laufenden Prozesses entpackt, stirbt er mitten drin.
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+    echo "[INFO] Stoppe Container fuer den Backend-Tausch..."
+    docker compose stop solarmanager || true
+
+    echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
+    if ! sm_download_and_extract "$LATEST_BACKEND_URL" "$INSTALL_DIR/app"; then
+        echo "[FEHLER] Backend-Update fehlgeschlagen - starte Container wieder..."
+        docker compose up -d || true
+        exit 1
+    fi
+    echo "[OK] Backend aktualisiert."
 fi
 
 # Container neu starten

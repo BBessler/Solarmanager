@@ -21,6 +21,78 @@ done
 
 WEB_DIR="/var/www/html"
 VERSION_FILE="/var/www/html/.solarmanager_versions"
+SERVICE="solarmanager.service"
+LOG_DIR="/var/log/solarmanager"
+LOG_FILE="$LOG_DIR/update.log"
+STATE_FILE="$LOG_DIR/update.state"
+SERVICE_STOPPED=false
+
+# =============================================================================
+# In eigene systemd-Unit umziehen
+# Wird das Update aus dem Backend heraus gestartet, laeuft dieses Script als
+# Kindprozess im cgroup von solarmanager.service. Sobald der Dienst neu startet
+# (geplant oder weil das Entpacken den laufenden Prozess erwischt), raeumt
+# systemd den ganzen cgroup ab und bricht das Update mitten drin ab - typisch:
+# Backend aktualisiert, Frontend nicht. Als eigene transiente Unit ueberlebt
+# das Update den Dienst-Neustart.
+# =============================================================================
+if [ -z "$SM_UPDATE_DETACHED" ] \
+   && grep -qa "solarmanager\.service" /proc/self/cgroup 2>/dev/null \
+   && command -v systemd-run > /dev/null 2>&1; then
+    echo "[INFO] Update wird in eine eigene systemd-Unit verschoben..."
+    sudo -n systemctl reset-failed solarmanager-update.service > /dev/null 2>&1 || true
+    if sudo -n systemd-run --unit=solarmanager-update --collect \
+            --description="Solarmanager Update" \
+            --setenv=SM_UPDATE_DETACHED=1 \
+            /bin/bash "$0" "$@" > /dev/null 2>&1; then
+        echo "[OK] Update laeuft eigenstaendig weiter (Unit: solarmanager-update)."
+        exit 0
+    fi
+    echo "[WARNUNG] Umzug fehlgeschlagen - Update laeuft als Kindprozess weiter."
+fi
+
+# =============================================================================
+# Logging
+# Die Ausgabe geht zusaetzlich in eine Datei, damit das Frontend den Verlauf
+# auch dann noch anzeigen kann, wenn das Backend zwischendurch neu startet.
+# Der Endstatus landet in einer eigenen Datei, damit das Frontend erkennt,
+# ob das Update noch laeuft, fertig ist oder abgebrochen wurde.
+# =============================================================================
+if ! sudo mkdir -p "$LOG_DIR" 2>/dev/null \
+   || ! sudo touch "$LOG_FILE" "$STATE_FILE" 2>/dev/null; then
+    # Kein Schreibzugriff auf /var/log: ausweichen statt das Update abzubrechen.
+    # Das Backend sucht die Dateien in beiden Verzeichnissen.
+    LOG_DIR="/tmp/solarmanager"
+    LOG_FILE="$LOG_DIR/update.log"
+    STATE_FILE="$LOG_DIR/update.state"
+    mkdir -p "$LOG_DIR"
+    touch "$LOG_FILE" "$STATE_FILE"
+fi
+sudo chmod 755 "$LOG_DIR" 2>/dev/null || true
+sudo chown "$(id -un):$(id -gn)" "$LOG_FILE" "$STATE_FILE" 2>/dev/null || true
+sudo chmod 644 "$LOG_FILE" "$STATE_FILE" 2>/dev/null || true
+: > "$LOG_FILE"
+echo "running" > "$STATE_FILE"
+
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+sm_finish() {
+    local code=$1
+
+    # Sicherheitsnetz: Dienst nie gestoppt zuruecklassen
+    if [ "$SERVICE_STOPPED" = true ]; then
+        echo "[WARNUNG] Update abgebrochen - starte $SERVICE wieder..."
+        sudo systemctl start "$SERVICE" || true
+    fi
+
+    sleep 1   # letzte Zeilen durch tee flushen lassen
+    if [ "$code" -eq 0 ]; then
+        echo "success" > "$STATE_FILE"
+    else
+        echo "failed" > "$STATE_FILE"
+    fi
+}
+trap 'sm_finish $?' EXIT
 
 # Shared Library laden
 LIB_DIR="$(dirname "$0")"
@@ -109,40 +181,8 @@ else
   fi
 fi
 
-# Backend aktualisieren (nur wenn geaendert)
-if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
-  echo ""
-  echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-  sm_download_and_extract "$LATEST_BACKEND_URL" "$WEB_DIR/backend" "true" || exit 1
-  echo "[OK] Backend aktualisiert."
-fi
-
-# Frontend aktualisieren (nur wenn geaendert)
-if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_TAG" ]; then
-  echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
-
-  # config.json sichern
-  CONFIG_BACKUP=""
-  if [ -f "$WEB_DIR/config.json" ]; then
-    CONFIG_BACKUP=$(cat "$WEB_DIR/config.json")
-  fi
-
-  sm_download_and_extract "$LATEST_FRONTEND_URL" "$WEB_DIR" "true" || exit 1
-
-  # config.json wiederherstellen
-  if [ -n "$CONFIG_BACKUP" ]; then
-    echo "$CONFIG_BACKUP" | sudo tee "$WEB_DIR/config.json" > /dev/null
-    echo "[OK] config.json wiederhergestellt."
-  fi
-  echo "[OK] Frontend aktualisiert."
-fi
-
-# Rechte setzen
-sudo chown -R pi:pi "$WEB_DIR"
-sudo find "$WEB_DIR" -type d -exec chmod 755 {} \;
-sudo find "$WEB_DIR" -type f -exec chmod 644 {} \;
-
-# .NET pruefen und ggf. installieren
+# .NET pruefen und ggf. installieren (vor dem Backend-Tausch, damit der Dienst
+# nicht ohne Runtime dasteht)
 if command -v dotnet &> /dev/null; then
     echo "[INFO] .NET ist installiert (Version: $(dotnet --version 2>/dev/null || echo 'unbekannt'))."
 else
@@ -162,23 +202,68 @@ else
     fi
 fi
 
-# Installierte Versionen speichern (vor Restart, da das Script als Child-Prozess des Backends laeuft)
+# Frontend zuerst aktualisieren: statische Dateien, beruehrt den laufenden
+# Dienst nicht. Faellt der Backend-Schritt aus, ist das Frontend trotzdem da.
+if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_TAG" ]; then
+  echo ""
+  echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
+
+  # config.json sichern
+  CONFIG_BACKUP=""
+  if [ -f "$WEB_DIR/config.json" ]; then
+    CONFIG_BACKUP=$(cat "$WEB_DIR/config.json")
+  fi
+
+  sm_download_and_extract "$LATEST_FRONTEND_URL" "$WEB_DIR" "true" || exit 1
+
+  # config.json wiederherstellen
+  if [ -n "$CONFIG_BACKUP" ]; then
+    echo "$CONFIG_BACKUP" | sudo tee "$WEB_DIR/config.json" > /dev/null
+    echo "[OK] config.json wiederhergestellt."
+  fi
+  echo "[OK] Frontend aktualisiert."
+fi
+
+# Backend aktualisieren (nur wenn geaendert). Der Dienst wird vorher gestoppt:
+# Wird ueber die Dateien des laufenden Prozesses entpackt, stirbt er mitten im
+# Update.
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+  echo ""
+  echo "[INFO] Stoppe $SERVICE fuer den Backend-Tausch..."
+  sudo systemctl stop "$SERVICE" || true
+  SERVICE_STOPPED=true
+
+  echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
+  sm_download_and_extract "$LATEST_BACKEND_URL" "$WEB_DIR/backend" "true" || exit 1
+  echo "[OK] Backend aktualisiert."
+fi
+
+# Rechte setzen
+echo "[INFO] Setze Rechte..."
+sudo chown -R pi:pi "$WEB_DIR"
+sudo find "$WEB_DIR" -type d -exec chmod 755 {} \;
+sudo find "$WEB_DIR" -type f -exec chmod 644 {} \;
+
+# Installierte Versionen speichern
 sudo tee "$VERSION_FILE" > /dev/null <<EOF
 INSTALLED_BACKEND="$LATEST_BACKEND_TAG"
 INSTALLED_FRONTEND="$LATEST_FRONTEND_TAG"
 EOF
 echo "[OK] Versionsdatei aktualisiert."
 
-# Backend neu starten
-echo "[INFO] Starte Backend neu..."
-sudo systemctl restart solarmanager.service
+# Backend starten (nur noetig, wenn es getauscht wurde)
+if [ "$SERVICE_STOPPED" = true ]; then
+  echo "[INFO] Starte Backend..."
+  sudo systemctl start "$SERVICE"
+  SERVICE_STOPPED=false
 
-echo "[INFO] Warte auf Backend-Start..."
-if sm_health_check "http://localhost:5000" 60; then
-    echo ""
-    echo "[OK] Backend ist bereit."
-else
-    echo "[WARNUNG] Backend antwortet noch nicht. Bitte manuell pruefen: sudo systemctl status solarmanager.service"
+  echo "[INFO] Warte auf Backend-Start..."
+  if sm_health_check "http://localhost:5000" 120; then
+      echo ""
+      echo "[OK] Backend ist bereit."
+  else
+      echo "[WARNUNG] Backend antwortet noch nicht. Bitte manuell pruefen: sudo systemctl status $SERVICE"
+  fi
 fi
 
 echo ""
