@@ -258,7 +258,7 @@ if [ "$SERVICE_STOPPED" = true ]; then
   SERVICE_STOPPED=false
 
   echo "[INFO] Warte auf Backend-Start..."
-  if sm_health_check "http://localhost:5000" 120; then
+  if sm_health_check "http://localhost:5000/healthz" 120; then
       echo ""
       echo "[OK] Backend ist bereit."
   else

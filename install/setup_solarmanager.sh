@@ -423,7 +423,7 @@ sudo systemctl enable solarmanager.service
 sudo systemctl start solarmanager.service
 
 echo "[INFO] Warte auf Backend-Start..."
-if sm_health_check "http://localhost:5000" 60; then
+if sm_health_check "http://localhost:5000/healthz" 60; then
     echo ""
     echo "[OK] Backend ist bereit."
 else

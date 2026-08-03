@@ -98,14 +98,22 @@ sm_download_and_extract() {
     rm -f "$tmp_file"
 }
 
-# Health-Check: Wartet bis URL antwortet (nur 200|301|302, kein 404)
+# Health-Check: Wartet bis der Dienst HTTP spricht.
+# Bewertet wird nur, ob ueberhaupt geantwortet wird - welcher Statuscode kommt,
+# ist egal. Das Backend liefert unter "/" naemlich 404 (das Frontend kommt von
+# Apache, das Backend hat kein wwwroot); auf 200 zu warten lief deshalb immer in
+# den Timeout, obwohl der Dienst laengst lief.
 sm_health_check() {
     local url="$1"
     local max_wait="${2:-60}"
     local wait=0
+    local code
 
     while [ $wait -lt $max_wait ]; do
-        if curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null | grep -q "200\|301\|302"; then
+        # "|| true": Solange der Dienst nicht antwortet, endet curl mit Fehler -
+        # ohne das wuerde "set -e" das Update hier abbrechen.
+        code=$(curl -s -o /dev/null -m 5 -w "%{http_code}" "$url" 2>/dev/null || true)
+        if [ -n "$code" ] && [ "$code" != "000" ]; then
             return 0
         fi
         sleep 2
