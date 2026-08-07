@@ -4,6 +4,8 @@
 
 🌐 **[solarmanager.online](http://solarmanager.online)** · 📖 **[Installation (Wiki)](https://github.com/BBessler/Solarmanager/wiki)** · 🔌 **[Unterstützte Geräte](http://solarmanager.online/geraete.html)**
 
+🌐 **[DEMO](http://solarmanager.online/demo/)**
+
 ![Dashboard](images/Dashboard.jpg)
 
 ### Features
