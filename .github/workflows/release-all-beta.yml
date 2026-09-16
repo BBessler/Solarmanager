@@ -14,7 +14,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          TAG=$(gh api repos/BBessler/Solarmanager/releases --jq '[.[] | select(.prerelease == true) | select(.tag_name | startswith("beta-backend-"))][0].tag_name // empty' 2>/dev/null || true)
+          TAG=$(gh api repos/BBessler/Solarmanager/releases --paginate --jq '[.[] | select(.prerelease == true) | select(.tag_name | startswith("beta-backend-"))][0].tag_name // empty' 2>/dev/null || true)
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Letzter Beta-Backend-Tag: ${TAG:-keiner}"
 
@@ -23,7 +23,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          TAG=$(gh api repos/BBessler/Solarmanager/releases --jq '[.[] | select(.prerelease == true) | select(.tag_name | startswith("beta-frontend-"))][0].tag_name // empty' 2>/dev/null || true)
+          TAG=$(gh api repos/BBessler/Solarmanager/releases --paginate --jq '[.[] | select(.prerelease == true) | select(.tag_name | startswith("beta-frontend-"))][0].tag_name // empty' 2>/dev/null || true)
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Letzter Beta-Frontend-Tag: ${TAG:-keiner}"
 
@@ -36,7 +36,7 @@ jobs:
           LAST_TAG="${{ steps.last_backend.outputs.tag }}"
 
           if [ -n "$LAST_TAG" ]; then
-            SINCE=$(gh api repos/BBessler/Solarmanager/releases --jq \
+            SINCE=$(gh api repos/BBessler/Solarmanager/releases --paginate --jq \
               "[.[] | select(.tag_name == \"$LAST_TAG\")][0].created_at // empty" 2>/dev/null || true)
           fi
 
@@ -66,7 +66,7 @@ jobs:
           LAST_TAG="${{ steps.last_frontend.outputs.tag }}"
 
           if [ -n "$LAST_TAG" ]; then
-            SINCE=$(gh api repos/BBessler/Solarmanager/releases --jq \
+            SINCE=$(gh api repos/BBessler/Solarmanager/releases --paginate --jq \
               "[.[] | select(.tag_name == \"$LAST_TAG\")][0].created_at // empty" 2>/dev/null || true)
           fi
 

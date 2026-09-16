@@ -1,0 +1,86 @@
+name: Alte Releases aufräumen
+
+# Haelt die Zahl der Releases klein. Hintergrund: Die Update-Scripte und die
+# Release-Workflows lesen die Releases ueber die GitHub-API. Ohne Pagination liefert
+# die nur 30 Eintraege — am 16.09.2026 fuellten die stabilen plus die beta-frontend-
+# Releases genau diese Seite, alle beta-backend-Tags lagen dahinter und waren
+# unsichtbar. Das Update lief mit leerem Tag durch und installierte nichts.
+#
+# Die Abfragen sind inzwischen paginiert. Dieses Aufraeumen ist die zweite Haelfte:
+# Es haelt die Liste ueberschaubar, statt sich auf Pagination allein zu verlassen.
+
+on:
+  schedule:
+    # Sonntags nachts, nach den ueblichen Release-Zeiten
+    - cron: '17 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      behalten:
+        description: 'Wie viele Releases je Praefix behalten'
+        required: false
+        default: '12'
+      probelauf:
+        description: 'Nur anzeigen, nichts loeschen'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  aufraeumen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Alte Releases je Praefix entfernen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: BBessler/Solarmanager
+          BEHALTEN: ${{ github.event.inputs.behalten || '12' }}
+          # Der geplante Lauf raeumt wirklich auf; von Hand ist der Probelauf die
+          # Vorgabe, damit ein versehentlicher Klick nichts loescht.
+          PROBELAUF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.probelauf || 'false' }}
+        run: |
+          set -euo pipefail
+
+          echo "Behalte je Praefix: $BEHALTEN   Probelauf: $PROBELAUF"
+          echo ""
+
+          # --paginate: sonst sieht dieser Job selbst nur die ersten 30 Releases und
+          # wuerde ausgerechnet die aeltesten nie zu Gesicht bekommen.
+          ALLE=$(gh api "repos/$REPO/releases" --paginate \
+            --jq '.[] | [.tag_name, .created_at] | @tsv')
+
+          GESAMT=$(echo "$ALLE" | grep -c . || true)
+          echo "Insgesamt $GESAMT Releases im Repo."
+          echo ""
+
+          for PRAEFIX in "beta-backend-" "beta-frontend-" "backend-" "frontend-"; do
+            # Nur exakt dieses Praefix: "backend-" darf nicht die "beta-backend-"
+            # Tags mitnehmen, deshalb der Anker am Zeilenanfang.
+            TAGS=$(echo "$ALLE" | awk -v p="^$PRAEFIX" '$1 ~ p {print $1}' | sort -r)
+            ANZAHL=$(echo "$TAGS" | grep -c . || true)
+            echo "== $PRAEFIX : $ANZAHL Releases"
+
+            if [ "$ANZAHL" -le "$BEHALTEN" ]; then
+              echo "   nichts zu tun"
+              echo ""
+              continue
+            fi
+
+            ZU_LOESCHEN=$(echo "$TAGS" | tail -n +$((BEHALTEN + 1)))
+            echo "$ZU_LOESCHEN" | while read -r TAG; do
+              [ -z "$TAG" ] && continue
+              if [ "$PROBELAUF" = "true" ]; then
+                echo "   [Probelauf] wuerde loeschen: $TAG"
+              else
+                echo "   loesche: $TAG"
+                # --cleanup-tag entfernt auch den Git-Tag; ohne ihn bliebe der Tag
+                # stehen und die Liste waechst an anderer Stelle weiter.
+                gh release delete "$TAG" --repo "$REPO" --yes --cleanup-tag
+              fi
+            done
+            echo ""
+          done
+
+          echo "Fertig."
