@@ -97,6 +97,20 @@ LATEST_BACKEND_URL=$(echo "$LATEST_BACKEND_INFO" | cut -d'|' -f2)
 LATEST_FRONTEND_TAG=$(echo "$LATEST_FRONTEND_INFO" | cut -d'|' -f1)
 LATEST_FRONTEND_URL=$(echo "$LATEST_FRONTEND_INFO" | cut -d'|' -f2)
 
+# Leeres Ergebnis heisst: kein passendes Release gefunden - NICHT weitermachen.
+# Sonst laeuft das Update mit leerem Tag durch, installiert nichts und ueberschreibt
+# am Ende die Versionsdatei mit leeren Werten (siehe update_solarmanager.sh).
+if [ -z "$LATEST_BACKEND_TAG" ] || [ -z "$LATEST_BACKEND_URL" ]; then
+  echo "[FEHLER] Kein Backend-Release fuer Kanal '$CHANNEL' gefunden."
+  echo "[FEHLER] Die Versionsdatei bleibt unveraendert."
+  exit 1
+fi
+if [ -z "$LATEST_FRONTEND_TAG" ] || [ -z "$LATEST_FRONTEND_URL" ]; then
+  echo "[FEHLER] Kein Frontend-Release fuer Kanal '$CHANNEL' gefunden."
+  echo "[FEHLER] Die Versionsdatei bleibt unveraendert."
+  exit 1
+fi
+
 echo ""
 echo "  Installiert        Verfuegbar"
 echo "  Backend:  $INSTALLED_BACKEND  ->  $LATEST_BACKEND_TAG"
@@ -148,9 +162,17 @@ if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_URL" ]; then
 fi
 
 # Versionsdatei schreiben
+# Nur fortschreiben, was in diesem Lauf wirklich getauscht wurde.
+NEUES_BACKEND="$INSTALLED_BACKEND"
+NEUES_FRONTEND="$INSTALLED_FRONTEND"
+[ "$BACKEND_CHANGED" = true ] && NEUES_BACKEND="$LATEST_BACKEND_TAG"
+[ "$FRONTEND_CHANGED" = true ] && NEUES_FRONTEND="$LATEST_FRONTEND_TAG"
+[ "$NEUES_BACKEND" = "(unbekannt)" ] && NEUES_BACKEND=""
+[ "$NEUES_FRONTEND" = "(unbekannt)" ] && NEUES_FRONTEND=""
+
 cat > "$VERSION_FILE" <<EOF
-INSTALLED_BACKEND="$LATEST_BACKEND_TAG"
-INSTALLED_FRONTEND="$LATEST_FRONTEND_TAG"
+INSTALLED_BACKEND="$NEUES_BACKEND"
+INSTALLED_FRONTEND="$NEUES_FRONTEND"
 EOF
 echo "[OK] Versionsdatei aktualisiert."
 
