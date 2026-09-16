@@ -8,30 +8,73 @@ GITHUB_RELEASE_REPO="BBessler/Solarmanager"
 
 # GitHub API einmal abrufen, Ergebnis in $SM_RELEASES
 #
-# per_page=100 ist wesentlich: Ohne Angabe liefert GitHub nur die ersten 30 Releases.
-# Gemessen am 16.09.2026 fuellten die 14 stabilen plus 16 beta-frontend-Releases genau
-# diese erste Seite - saemtliche beta-backend-Tags lagen dahinter und waren fuer das
-# Update unsichtbar. Das Update lief dann mit leerem Tag durch, installierte nichts und
-# meldete trotzdem Erfolg.
+# Echte Pagination, nicht nur per_page: GitHub deckelt die Seitengroesse bei 100, das
+# Repo haelt aber ueber 150 Releases. Ein einzelner Aufruf mit per_page=100 lieferte
+# genau 100 Eintraege und schnitt den Rest ab.
 #
-# Steigt die Zahl der Releases ueber 100, muss echt paginiert werden. Damit das nicht
-# still passiert, warnt die Pruefung am Ende.
+# Vorgeschichte: Ganz ohne per_page waren es 30. Die stabilen plus die beta-frontend-
+# Releases fuellten die Seite, alle beta-backend-Tags lagen dahinter und waren
+# unsichtbar — das Update lief mit leerem Tag durch und installierte nichts.
+#
+# Die Seiten werden ueber DATEIEN zusammengefuehrt, nicht ueber Shell-Variablen als
+# Argument: Die JSON-Antwort ist mehrere hundert Kilobyte gross, als Kommandozeilen-
+# Argument scheitert das an der Laengengrenze ("Argument list too long").
 sm_fetch_releases() {
-    SM_RELEASES=$(curl -fsSL \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/$GITHUB_RELEASE_REPO/releases?per_page=100")
+    local seite=1
+    local tmpdir
+    tmpdir=$(mktemp -d)
 
-    if [ -z "$SM_RELEASES" ] || echo "$SM_RELEASES" | grep -q '"message"'; then
-        echo "[FEHLER] GitHub API nicht erreichbar."
+    while : ; do
+        if ! curl -fsSL             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$GITHUB_RELEASE_REPO/releases?per_page=100&page=$seite"             -o "$tmpdir/seite_$seite.json"; then
+            if [ "$seite" -eq 1 ]; then
+                rm -rf "$tmpdir"
+                echo "[FEHLER] GitHub API nicht erreichbar."
+                return 1
+            fi
+            rm -f "$tmpdir/seite_$seite.json"
+            break
+        fi
+
+        if grep -q '"message"' "$tmpdir/seite_$seite.json"; then
+            if [ "$seite" -eq 1 ]; then
+                rm -rf "$tmpdir"
+                echo "[FEHLER] GitHub API meldet einen Fehler (Rate-Limit?)."
+                return 1
+            fi
+            rm -f "$tmpdir/seite_$seite.json"
+            break
+        fi
+
+        local anzahl
+        anzahl=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" "$tmpdir/seite_$seite.json" 2>/dev/null || echo 0)
+        [ "$anzahl" -eq 0 ] && { rm -f "$tmpdir/seite_$seite.json"; break; }
+        [ "$anzahl" -lt 100 ] && { seite=$((seite + 1)); break; }
+
+        seite=$((seite + 1))
+        if [ "$seite" -gt 20 ]; then
+            echo "[WARNUNG] Mehr als 2000 Releases — Abruf abgebrochen."
+            break
+        fi
+    done
+
+    SM_RELEASES=$(python3 -c "
+import json, glob, sys, os
+alle = []
+for f in sorted(glob.glob(os.path.join(sys.argv[1], 'seite_*.json'))):
+    with open(f) as fh:
+        alle.extend(json.load(fh))
+json.dump(alle, sys.stdout)
+" "$tmpdir" 2>/dev/null)
+
+    rm -rf "$tmpdir"
+
+    local summe
+    summe=$(echo "$SM_RELEASES" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+    if [ "$summe" -eq 0 ]; then
+        echo "[FEHLER] Keine Releases erhalten."
         return 1
     fi
-
-    local anzahl
-    anzahl=$(echo "$SM_RELEASES" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
-    if [ "$anzahl" -ge 100 ]; then
-        echo "[WARNUNG] 100 Releases erhalten - die Seitengrenze ist erreicht."
-        echo "[WARNUNG] Aeltere Tags sind ab jetzt unsichtbar, sm_fetch_releases braucht Pagination."
-    fi
+    echo "[INFO] $summe Releases geladen."
 }
 
 # Neuestes Release nach Tag-Prefix finden
