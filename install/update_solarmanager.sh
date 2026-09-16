@@ -103,6 +103,10 @@ fi
 . "$LIB_DIR/lib_solarmanager.sh"
 
 echo "### Solarmanager Update ($CHANNEL) ###"
+# Aufruf protokollieren: Ohne das laesst sich hinterher nicht klaeren, ob ein Lauf mit
+# gepinnter Version kam oder den neuesten Tag suchen sollte - und genau daran hing die
+# Fehlersuche am 16.09.2026 fest.
+echo "[INFO] Aufruf: Kanal=$CHANNEL  Backend-Version=${BACKEND_VERSION:-(neueste)}  Frontend-Version=${FRONTEND_VERSION:-(neueste)}"
 echo ""
 
 # Installierte Versionen laden (falls vorhanden)
@@ -147,18 +151,37 @@ LATEST_FRONTEND_URL=$(echo "$LATEST_FRONTEND_INFO" | cut -d'|' -f2)
 #
 # Ein fehlendes Release ist ein Fehler, kein "alles aktuell": Wer ein Update anstoesst,
 # soll erfahren, dass es fuer seinen Kanal nichts gibt.
-if [ -z "$LATEST_BACKEND_TAG" ] || [ -z "$LATEST_BACKEND_URL" ]; then
-  echo "[FEHLER] Kein Backend-Release fuer Kanal '$CHANNEL' gefunden."
-  echo "[FEHLER] Gesucht wurde nach dem Praefix 'beta-backend-' bzw. 'backend-'."
+# Leeres Ergebnis heisst: kein passendes Release gefunden - NICHT weitermachen.
+# Die Meldung nennt die tatsaechliche Ursache: ein gepinnter Tag, den es nicht gibt, ist
+# etwas anderes als ein Kanal ohne Release. Vorher stand in beiden Faellen derselbe
+# Praefix-Text und fuehrte die Fehlersuche in die Irre.
+sm_pruefe_treffer() {
+  local was="$1" tag="$2" url="$3" gepinnt="$4" praefix="$5"
+
+  if [ -n "$tag" ] && [ -n "$url" ]; then
+    return 0
+  fi
+
+  if [ -n "$gepinnt" ]; then
+    echo "[FEHLER] $was-Version '$gepinnt' wurde nicht gefunden."
+    echo "[FEHLER] Der Tag existiert nicht oder hat kein Release-Asset."
+  elif [ -n "$tag" ]; then
+    echo "[FEHLER] $was-Release '$tag' hat kein Download-Asset."
+  else
+    echo "[FEHLER] Kein $was-Release fuer Kanal '$CHANNEL' (Praefix '$praefix')."
+  fi
   echo "[FEHLER] Die Versionsdatei bleibt unveraendert."
-  exit 1
+  return 1
+}
+
+if [ "$CHANNEL" = "beta" ]; then
+  BACKEND_PRAEFIX="beta-backend-"; FRONTEND_PRAEFIX="beta-frontend-"
+else
+  BACKEND_PRAEFIX="backend-"; FRONTEND_PRAEFIX="frontend-"
 fi
-if [ -z "$LATEST_FRONTEND_TAG" ] || [ -z "$LATEST_FRONTEND_URL" ]; then
-  echo "[FEHLER] Kein Frontend-Release fuer Kanal '$CHANNEL' gefunden."
-  echo "[FEHLER] Gesucht wurde nach dem Praefix 'beta-frontend-' bzw. 'frontend-'."
-  echo "[FEHLER] Die Versionsdatei bleibt unveraendert."
-  exit 1
-fi
+
+sm_pruefe_treffer "Backend" "$LATEST_BACKEND_TAG" "$LATEST_BACKEND_URL"   "$BACKEND_VERSION" "$BACKEND_PRAEFIX" || exit 1
+sm_pruefe_treffer "Frontend" "$LATEST_FRONTEND_TAG" "$LATEST_FRONTEND_URL"   "$FRONTEND_VERSION" "$FRONTEND_PRAEFIX" || exit 1
 
 echo ""
 echo "  Installiert        Verfuegbar"
