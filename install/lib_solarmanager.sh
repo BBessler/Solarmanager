@@ -7,14 +7,30 @@
 GITHUB_RELEASE_REPO="BBessler/Solarmanager"
 
 # GitHub API einmal abrufen, Ergebnis in $SM_RELEASES
+#
+# per_page=100 ist wesentlich: Ohne Angabe liefert GitHub nur die ersten 30 Releases.
+# Gemessen am 16.09.2026 fuellten die 14 stabilen plus 16 beta-frontend-Releases genau
+# diese erste Seite - saemtliche beta-backend-Tags lagen dahinter und waren fuer das
+# Update unsichtbar. Das Update lief dann mit leerem Tag durch, installierte nichts und
+# meldete trotzdem Erfolg.
+#
+# Steigt die Zahl der Releases ueber 100, muss echt paginiert werden. Damit das nicht
+# still passiert, warnt die Pruefung am Ende.
 sm_fetch_releases() {
     SM_RELEASES=$(curl -fsSL \
         -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/$GITHUB_RELEASE_REPO/releases")
+        "https://api.github.com/repos/$GITHUB_RELEASE_REPO/releases?per_page=100")
 
     if [ -z "$SM_RELEASES" ] || echo "$SM_RELEASES" | grep -q '"message"'; then
         echo "[FEHLER] GitHub API nicht erreichbar."
         return 1
+    fi
+
+    local anzahl
+    anzahl=$(echo "$SM_RELEASES" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+    if [ "$anzahl" -ge 100 ]; then
+        echo "[WARNUNG] 100 Releases erhalten - die Seitengrenze ist erreicht."
+        echo "[WARNUNG] Aeltere Tags sind ab jetzt unsichtbar, sm_fetch_releases braucht Pagination."
     fi
 }
 

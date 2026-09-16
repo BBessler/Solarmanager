@@ -138,6 +138,28 @@ LATEST_BACKEND_URL=$(echo "$LATEST_BACKEND_INFO" | cut -d'|' -f2)
 LATEST_FRONTEND_TAG=$(echo "$LATEST_FRONTEND_INFO" | cut -d'|' -f1)
 LATEST_FRONTEND_URL=$(echo "$LATEST_FRONTEND_INFO" | cut -d'|' -f2)
 
+# Leeres Ergebnis heisst: kein passendes Release gefunden - NICHT weitermachen.
+#
+# Ohne diese Pruefung lief das Update mit leerem Tag durch: Es lud nichts herunter,
+# entpackte nichts, schrieb am Ende aber INSTALLED_BACKEND="" in die Versionsdatei und
+# meldete Erfolg. Die vorher korrekte Version war damit ueberschrieben und die Anzeige
+# im Frontend leer (live am 16.09.2026, Kanal beta).
+#
+# Ein fehlendes Release ist ein Fehler, kein "alles aktuell": Wer ein Update anstoesst,
+# soll erfahren, dass es fuer seinen Kanal nichts gibt.
+if [ -z "$LATEST_BACKEND_TAG" ] || [ -z "$LATEST_BACKEND_URL" ]; then
+  echo "[FEHLER] Kein Backend-Release fuer Kanal '$CHANNEL' gefunden."
+  echo "[FEHLER] Gesucht wurde nach dem Praefix 'beta-backend-' bzw. 'backend-'."
+  echo "[FEHLER] Die Versionsdatei bleibt unveraendert."
+  exit 1
+fi
+if [ -z "$LATEST_FRONTEND_TAG" ] || [ -z "$LATEST_FRONTEND_URL" ]; then
+  echo "[FEHLER] Kein Frontend-Release fuer Kanal '$CHANNEL' gefunden."
+  echo "[FEHLER] Gesucht wurde nach dem Praefix 'beta-frontend-' bzw. 'frontend-'."
+  echo "[FEHLER] Die Versionsdatei bleibt unveraendert."
+  exit 1
+fi
+
 echo ""
 echo "  Installiert        Verfuegbar"
 echo "  Backend:  $INSTALLED_BACKEND  ->  $LATEST_BACKEND_TAG"
@@ -244,12 +266,25 @@ sudo chown -R pi:pi "$WEB_DIR"
 sudo find "$WEB_DIR" -type d -exec chmod 755 {} \;
 sudo find "$WEB_DIR" -type f -exec chmod 644 {} \;
 
-# Installierte Versionen speichern
+# Installierte Versionen speichern.
+#
+# Nur fortschreiben, was in diesem Lauf auch wirklich getauscht wurde: Wurde nur das
+# Frontend aktualisiert, darf die Backend-Zeile nicht auf den neuesten Tag springen -
+# sonst gilt eine Version als installiert, die nie ausgepackt wurde.
+NEUES_BACKEND="$INSTALLED_BACKEND"
+NEUES_FRONTEND="$INSTALLED_FRONTEND"
+[ "$BACKEND_CHANGED" = true ] && NEUES_BACKEND="$LATEST_BACKEND_TAG"
+[ "$FRONTEND_CHANGED" = true ] && NEUES_FRONTEND="$LATEST_FRONTEND_TAG"
+
+# "(unbekannt)" ist der Platzhalter aus dem Einlesen und gehoert nicht in die Datei.
+[ "$NEUES_BACKEND" = "(unbekannt)" ] && NEUES_BACKEND=""
+[ "$NEUES_FRONTEND" = "(unbekannt)" ] && NEUES_FRONTEND=""
+
 sudo tee "$VERSION_FILE" > /dev/null <<EOF
-INSTALLED_BACKEND="$LATEST_BACKEND_TAG"
-INSTALLED_FRONTEND="$LATEST_FRONTEND_TAG"
+INSTALLED_BACKEND="$NEUES_BACKEND"
+INSTALLED_FRONTEND="$NEUES_FRONTEND"
 EOF
-echo "[OK] Versionsdatei aktualisiert."
+echo "[OK] Versionsdatei aktualisiert: Backend=$NEUES_BACKEND Frontend=$NEUES_FRONTEND"
 
 # Backend starten (nur noetig, wenn es getauscht wurde)
 if [ "$SERVICE_STOPPED" = true ]; then
