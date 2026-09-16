@@ -99,6 +99,49 @@ for r in releases:
 " 2>/dev/null
 }
 
+# Einen vom Aufrufer uebergebenen Tag aufloesen - tolerant gegenueber kaputten Aufrufern.
+#
+# WICHTIG: Dieses Script ist die Rettungsleine. Das Backend laedt es bei jedem Lauf frisch
+# von GitHub, es ist damit der einzige Teil, der auch eine ALTE Installation noch erreicht.
+# Es darf deshalb nie daran scheitern, dass der Aufrufer Unsinn schickt - sonst kommt ein
+# Geraet aus seiner alten Version nicht mehr heraus.
+#
+# Bekannter Fall (16.09.2026): Die Oberflaeche baute den Tag als "backend-${installed}"
+# zusammen, obwohl installed bereits der vollstaendige Tag war. Heraus kam
+# "backend-beta-backend-2026.09.16". Ein hartes Abbrechen haette jede Installation mit
+# dieser Oberflaeche dauerhaft festgesetzt.
+#
+# Reihenfolge: exakter Tag -> doppeltes Praefix abschneiden -> neuester Tag des Kanals.
+# Gibt "tag|url" zurueck, leer wenn nichts passt.
+sm_aufloesen_tag() {
+    local wunsch="$1" praefix="$2" channel="$3"
+    local treffer=""
+
+    if [ -n "$wunsch" ]; then
+        treffer=$(sm_get_by_tag "$wunsch")
+        if [ -n "$treffer" ]; then
+            echo "$treffer"
+            return 0
+        fi
+
+        # Doppeltes Praefix: "backend-beta-backend-2026.09.16" -> "beta-backend-2026.09.16"
+        local bereinigt="${wunsch#backend-}"
+        bereinigt="${bereinigt#frontend-}"
+        if [ "$bereinigt" != "$wunsch" ]; then
+            treffer=$(sm_get_by_tag "$bereinigt")
+            if [ -n "$treffer" ]; then
+                echo "[WARNUNG] Tag '$wunsch' war doppelt praefixiert, verwende '$bereinigt'." >&2
+                echo "$treffer"
+                return 0
+            fi
+        fi
+
+        echo "[WARNUNG] Tag '$wunsch' nicht gefunden - weiche auf den neuesten Tag aus." >&2
+    fi
+
+    sm_get_latest "$praefix" "$channel"
+}
+
 # Release nach exaktem Tag finden - gibt "tag|url" zurueck
 sm_get_by_tag() {
     local tag="$1"

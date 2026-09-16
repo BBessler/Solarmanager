@@ -120,21 +120,17 @@ fi
 echo "[INFO] Pruefe auf neue Versionen..."
 sm_fetch_releases || exit 1
 
-if [ -n "$BACKEND_VERSION" ]; then
-  LATEST_BACKEND_INFO=$(sm_get_by_tag "$BACKEND_VERSION")
-elif [ "$CHANNEL" = "beta" ]; then
-  LATEST_BACKEND_INFO=$(sm_get_latest "beta-backend-" "beta")
+if [ "$CHANNEL" = "beta" ]; then
+  BACKEND_PRAEFIX="beta-backend-"; FRONTEND_PRAEFIX="beta-frontend-"
 else
-  LATEST_BACKEND_INFO=$(sm_get_latest "backend-" "stable")
+  BACKEND_PRAEFIX="backend-"; FRONTEND_PRAEFIX="frontend-"
 fi
 
-if [ -n "$FRONTEND_VERSION" ]; then
-  LATEST_FRONTEND_INFO=$(sm_get_by_tag "$FRONTEND_VERSION")
-elif [ "$CHANNEL" = "beta" ]; then
-  LATEST_FRONTEND_INFO=$(sm_get_latest "beta-frontend-" "beta")
-else
-  LATEST_FRONTEND_INFO=$(sm_get_latest "frontend-" "stable")
-fi
+# Tolerant aufloesen: gepinnter Tag, sonst doppeltes Praefix bereinigen, sonst neuester
+# Tag des Kanals. Siehe sm_aufloesen_tag - dieses Script muss auch mit einem fehlerhaften
+# Aufrufer noch zu einem Update fuehren.
+LATEST_BACKEND_INFO=$(sm_aufloesen_tag "$BACKEND_VERSION" "$BACKEND_PRAEFIX" "$CHANNEL")
+LATEST_FRONTEND_INFO=$(sm_aufloesen_tag "$FRONTEND_VERSION" "$FRONTEND_PRAEFIX" "$CHANNEL")
 
 LATEST_BACKEND_TAG=$(echo "$LATEST_BACKEND_INFO" | cut -d'|' -f1)
 LATEST_BACKEND_URL=$(echo "$LATEST_BACKEND_INFO" | cut -d'|' -f2)
@@ -174,14 +170,11 @@ sm_pruefe_treffer() {
   return 1
 }
 
-if [ "$CHANNEL" = "beta" ]; then
-  BACKEND_PRAEFIX="beta-backend-"; FRONTEND_PRAEFIX="beta-frontend-"
-else
-  BACKEND_PRAEFIX="backend-"; FRONTEND_PRAEFIX="frontend-"
-fi
-
-sm_pruefe_treffer "Backend" "$LATEST_BACKEND_TAG" "$LATEST_BACKEND_URL"   "$BACKEND_VERSION" "$BACKEND_PRAEFIX" || exit 1
-sm_pruefe_treffer "Frontend" "$LATEST_FRONTEND_TAG" "$LATEST_FRONTEND_URL"   "$FRONTEND_VERSION" "$FRONTEND_PRAEFIX" || exit 1
+# Der gepinnte Tag entscheidet hier nicht mehr: sm_aufloesen_tag weicht bei einem
+# unbekannten Wunsch bereits auf den neuesten Tag des Kanals aus und warnt dabei.
+# Bleibt es trotzdem leer, gibt es fuer diesen Kanal wirklich kein Release.
+sm_pruefe_treffer "Backend" "$LATEST_BACKEND_TAG" "$LATEST_BACKEND_URL" "" "$BACKEND_PRAEFIX" || exit 1
+sm_pruefe_treffer "Frontend" "$LATEST_FRONTEND_TAG" "$LATEST_FRONTEND_URL" "" "$FRONTEND_PRAEFIX" || exit 1
 
 echo ""
 echo "  Installiert        Verfuegbar"
