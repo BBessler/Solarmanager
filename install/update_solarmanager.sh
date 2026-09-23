@@ -8,12 +8,14 @@ set -e
 # Parameter verarbeiten
 CHANNEL="stable"
 AUTO_MODE=false
+FORCE=false
 BACKEND_VERSION=""
 FRONTEND_VERSION=""
 for arg in "$@"; do
     case "$arg" in
         --beta)  CHANNEL="beta" ;;
         --auto)  AUTO_MODE=true ;;
+        --force) FORCE=true ;;
         --backend-version=*)  BACKEND_VERSION="${arg#*=}" ;;
         --frontend-version=*) FRONTEND_VERSION="${arg#*=}" ;;
     esac
@@ -189,6 +191,16 @@ if [ "$LATEST_BACKEND_TAG" != "$INSTALLED_BACKEND" ]; then
     BACKEND_CHANGED=true
 fi
 if [ "$LATEST_FRONTEND_TAG" != "$INSTALLED_FRONTEND" ]; then
+    FRONTEND_CHANGED=true
+fi
+
+# Neu installieren trotz gleichem Tag: Beta-Releases eines Tages tragen denselben Tag
+# (beta-backend-YYYY.MM.DD), ein spaeterer Build desselben Tages wurde sonst als
+# "Alles aktuell" verworfen - und im Auto-Modus beendete sich der Knopf "Aktuelle
+# Version neu installieren" ohne jede Installation.
+if [ "$FORCE" = true ]; then
+    echo "[INFO] Neuinstallation angefordert (--force)."
+    BACKEND_CHANGED=true
     FRONTEND_CHANGED=true
 fi
 
