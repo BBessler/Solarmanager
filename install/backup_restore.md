@@ -1,5 +1,52 @@
 # MariaDB Backup & Restore
 
+## Über die Oberfläche (empfohlen)
+
+Unter **Einstellungen → Datensicherung** lassen sich Sicherungen erstellen, herunterladen,
+hochladen und wiederherstellen. Dort wird auch die automatische Sicherung eingestellt
+(Uhrzeit, Wochentage, Anzahl, Kopie auf USB-Stick oder per SFTP/FTP/FTPS auf einen Server).
+
+- Gesichert werden `solardb` und `ocpp`.
+- Ablage: nativ `/var/backups/solarmanager`, Docker `~/solarmanager/app/backups`.
+- Vor jeder Wiederherstellung wird der aktuelle Stand automatisch gesichert
+  (Eintrag „Vor Wiederherstellung“). Damit lässt sie sich wieder rückgängig machen.
+- Hochladen nimmt eigene Sicherungen (`.tar`) und einfache Dumps von `solardb`
+  (`.sql`, `.sql.gz`) an, z. B. vom alten Cron-Backup.
+
+### Docker: bestehende Installation nachrüsten
+
+Neue Installationen bringen das mit. Bei bestehenden Docker-Installationen:
+
+1. In `~/solarmanager/docker-compose.yml` beim Dienst `solarmanager` unter `volumes:` ergänzen
+   (nur nötig für den USB-Stick):
+   ```yaml
+         - /media:/media:rslave
+   ```
+2. `Dockerfile` aktualisieren und neu bauen (bringt den MariaDB-Client mit):
+   ```bash
+   cd ~/solarmanager
+   curl -fsSL https://raw.githubusercontent.com/BBessler/Solarmanager/main/docker/Dockerfile -o Dockerfile
+   docker compose build solarmanager && docker compose up -d
+   ```
+   Ohne Neubau installiert die Datensicherung den Client beim ersten Lauf selbst nach
+   (Internet nötig, hält bis zum nächsten Neuaufbau des Containers).
+
+Der USB-Stick muss im Docker-Setup auf dem Host eingehängt sein, z. B. unter
+`/media/solarmanager-usb`. Diesen Pfad dann in der Oberfläche eintragen.
+
+### Altes Cron-Backup
+
+`create_Solarmanager_Backup.sh` legt einen Cronjob an, der nach `/var/www/html/solardb.sql`
+sichert. Wer auf die automatische Sicherung umsteigt und nicht doppelt sichern will, kann
+ihn entfernen:
+
+```bash
+sudo crontab -l | grep -v backup_solardb.sh | sudo crontab -
+sudo rm -f /var/www/html/solardb.sql /usr/local/bin/backup_solardb.sh
+```
+
+## Manuell auf der Kommandozeile
+
 Backup von einem bestehenden (nativen) Solarmanager ziehen und auf einem neuen Solarmanager (Docker-Setup) einspielen.
 
 Im Docker-Setup läuft MariaDB nativ auf dem Host — daher funktionieren alle Befehle direkt ohne Docker-Umwege.

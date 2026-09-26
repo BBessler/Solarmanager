@@ -15,6 +15,9 @@ services:
     volumes:
       - ./app:/app
       - /etc/localtime:/etc/localtime:ro
+      # USB-Stick fuer die Datensicherung: auf dem Host unter /media einhaengen,
+      # rslave reicht auch spaeter eingehaengte Sticks in den Container durch.
+      - /media:/media:rslave
 
   caddy:
     image: caddy:2-alpine
