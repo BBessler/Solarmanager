@@ -1,10 +1,12 @@
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 
-# Python fuer BMW/Hyundai-Scripts, tzdata fuer Zeitzonen-Unterstuetzung
+# Python fuer BMW/Hyundai-Scripts, tzdata fuer Zeitzonen-Unterstuetzung,
+# mariadb-client fuer die Datensicherung (MariaDB selbst laeuft auf dem Host)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv python3-dev \
         curl jq tzdata \
+        mariadb-client \
         gcc g++ make \
         libjpeg62-turbo-dev zlib1g-dev libffi-dev \
     && ln -sf /usr/bin/python3 /usr/bin/python \
