@@ -181,6 +181,19 @@ INSTALLED_FRONTEND="$NEUES_FRONTEND"
 EOF
 echo "[OK] Versionsdatei aktualisiert."
 
+# Besitz zurueckgeben: /app ist ein Ordner des Hosts (./app:/app), dieses Script laeuft im
+# Container aber als root. Ohne diesen Schritt gehoeren alle getauschten Dateien root, und
+# update_docker.sh auf dem Host (als pi) kann sie nicht mehr ueberschreiben
+# ("tar: Cannot open: Permission denied"). Massgeblich ist der Besitzer von /app selbst.
+APP_OWNER=$(stat -c '%u:%g' "$APP_DIR" 2>/dev/null || true)
+if [ -n "$APP_OWNER" ] && [ "$APP_OWNER" != "0:0" ] && [ "$(id -u)" = "0" ]; then
+    if chown -R "$APP_OWNER" "$APP_DIR"; then
+        echo "[OK] Dateien gehoeren wieder $APP_OWNER."
+    else
+        echo "[WARN] Besitz unter $APP_DIR nicht vollstaendig korrigierbar."
+    fi
+fi
+
 # Anwendung beenden - Docker restart-policy startet den Container neu
 echo "[INFO] Starte Anwendung neu..."
 echo "### Update abgeschlossen! ###"

@@ -41,6 +41,21 @@ fi
 
 cd "$INSTALL_DIR"
 
+# Dateien unter app/, die das Update ueber die Oberflaeche im Container als root angelegt hat,
+# kann dieser Benutzer weder ueberschreiben noch config.json/Versionsdatei neu schreiben.
+# Einmal zurueckgeben, statt mitten im Entpacken zu scheitern.
+if [ "$(id -u)" != "0" ] && [ -n "$(find "$INSTALL_DIR/app" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+    echo "[INFO] Dateien unter $INSTALL_DIR/app gehoeren nicht $(id -un) - Besitz wird korrigiert (sudo)..."
+    SUDO_CMD="sudo"
+    [ "$AUTO_MODE" = true ] && SUDO_CMD="sudo -n"
+    if ! $SUDO_CMD chown -R "$(id -u):$(id -g)" "$INSTALL_DIR/app"; then
+        echo "[FEHLER] Besitz nicht korrigierbar. Bitte ausfuehren:"
+        echo "         sudo chown -R $(id -un): $INSTALL_DIR/app"
+        exit 1
+    fi
+    echo "[OK] Besitz korrigiert."
+fi
+
 # Host-Zeitzone mit .env synchronisieren (falls sich die System-TZ geaendert hat
 # oder die TZ-Zeile in aelteren .env-Dateien fehlt)
 if [ -f "$INSTALL_DIR/.env" ]; then
