@@ -187,8 +187,14 @@ sm_download_and_extract() {
         sudo mkdir -p "$target_dir"
         sudo tar --overwrite --no-same-owner -xzf "$tmp_file" -C "$target_dir"
     else
+        # Ohne --overwrite: tar loescht jede vorhandene Datei und legt sie neu an, statt in
+        # sie hineinzuschreiben. Das Container-Update entpackt ueber das LAUFENDE Backend - ein
+        # Prozess, der eine DLL geladen hat, behaelt so die alte Datei bis zum Neustart, statt
+        # mitten im Entpacken an einer veraenderten DLL abzustuerzen (und das Script mitzunehmen).
+        # Der sudo-Zweig (native Installation) bleibt bei --overwrite: Dort steht der Dienst beim
+        # Backend-Tausch, und das Ueberschreiben an Ort behaelt den Besitzer der Dateien.
         mkdir -p "$target_dir"
-        tar --overwrite --no-same-owner -xzf "$tmp_file" -C "$target_dir"
+        tar --no-same-owner -xzf "$tmp_file" -C "$target_dir"
     fi
 
     if [ $? -ne 0 ]; then
