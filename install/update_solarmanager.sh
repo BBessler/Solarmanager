@@ -96,13 +96,28 @@ sm_finish() {
 }
 trap 'sm_finish $?' EXIT
 
-# Shared Library laden
+# Shared Library laden - IMMER frisch, passend zu diesem Script. Das Backend laedt das Script
+# bei jedem Lauf neu; eine Bibliothek daneben kann aber von einem frueheren Update stammen
+# (Backends bis 2026.09 legen beides direkt nach /tmp) und kennt dann neue Funktionen nicht:
+# "sm_aufloesen_tag: command not found". Die Kopie daneben ist nur der Rueckfall ohne GitHub.
 LIB_DIR="$(dirname "$0")"
+LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh"
+if curl -fsSL "$LIB_URL" -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
+    mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
+else
+    rm -f "$LIB_DIR/lib_solarmanager.sh.neu"
+    echo "[WARN] Bibliothek nicht von GitHub ladbar - verwende die vorhandene Kopie."
+fi
 if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
-    curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh" \
-        -o "$LIB_DIR/lib_solarmanager.sh"
+    echo "[FEHLER] Bibliothek lib_solarmanager.sh fehlt und ist nicht ladbar."
+    exit 1
 fi
 . "$LIB_DIR/lib_solarmanager.sh"
+if ! type sm_aufloesen_tag >/dev/null 2>&1; then
+    echo "[FEHLER] Die Bibliothek unter $LIB_DIR ist veraltet und GitHub nicht erreichbar."
+    echo "[FEHLER] Bitte $LIB_DIR/lib_solarmanager.sh loeschen und das Update erneut starten."
+    exit 1
+fi
 
 echo "### Solarmanager Update ($CHANNEL) ###"
 # Aufruf protokollieren: Ohne das laesst sich hinterher nicht klaeren, ob ein Lauf mit
