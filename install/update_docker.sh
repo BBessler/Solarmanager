@@ -25,11 +25,20 @@ done
 INSTALL_DIR="$HOME/solarmanager"
 VERSION_FILE="$INSTALL_DIR/app/.solarmanager_versions"
 
-# Shared Library laden
+# Shared Library laden - IMMER frisch, passend zu diesem Script. Eine Bibliothek daneben kann
+# von einem frueheren Lauf stammen und kennt dann neue Funktionen nicht. Die Kopie daneben
+# ist nur der Rueckfall ohne GitHub.
 LIB_DIR="$(dirname "$0")"
+LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh"
+if curl -fsSL "$LIB_URL" -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
+    mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
+else
+    rm -f "$LIB_DIR/lib_solarmanager.sh.neu"
+    echo "[WARN] Bibliothek nicht von GitHub ladbar - verwende die vorhandene Kopie."
+fi
 if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
-    curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh" \
-        -o "$LIB_DIR/lib_solarmanager.sh"
+    echo "[FEHLER] Bibliothek lib_solarmanager.sh fehlt und ist nicht ladbar."
+    exit 1
 fi
 . "$LIB_DIR/lib_solarmanager.sh"
 
