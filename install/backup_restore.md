@@ -7,7 +7,7 @@ hochladen und wiederherstellen. Dort wird auch die automatische Sicherung einges
 (Uhrzeit, Wochentage, Anzahl, Kopie auf USB-Stick oder per SFTP/FTP/FTPS auf einen Server).
 
 - Gesichert werden `solardb` und `ocpp`.
-- Ablage: nativ `/var/backups/solarmanager`, Docker `~/solarmanager/app/backups`.
+- Ablage: nativ `/var/backups/solarmanager`, Docker `~/solarmanager/app/backups` Der Ordner lässt sich unter „Ablage“ ändern; im Docker-Setup nur unterhalb von `/app` oder `/media`, sonst gehen die Sicherungen beim Neubau des Containers verloren.
 - Vor jeder Wiederherstellung wird der aktuelle Stand automatisch gesichert
   (Eintrag „Vor Wiederherstellung“). Damit lässt sie sich wieder rückgängig machen.
 - Hochladen nimmt eigene Sicherungen (`.tar`) und einfache Dumps von `solardb`
