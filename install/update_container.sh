@@ -209,6 +209,13 @@ if [ -n "$APP_OWNER" ] && [ "$APP_OWNER" != "0:0" ] && [ "$(id -u)" = "0" ]; the
     fi
 fi
 
+# Das Update in der Oberflaeche tauscht nur die Anwendung, nicht das Image. Fehlt ein Paket, das
+# neuere Versionen nutzen (iproute2 fuer die ARP-Pruefung der Netzwerkgeraete), baut es erst
+# update_docker.sh auf dem Host neu ein.
+if ! command -v ip > /dev/null 2>&1; then
+    echo "[HINWEIS] Image veraltet (iproute2 fehlt): einmal auf dem Host ~/solarmanager/update_docker.sh ausfuehren."
+fi
+
 # Anwendung beenden - Docker restart-policy startet den Container neu
 echo "[INFO] Starte Anwendung neu..."
 echo "### Update abgeschlossen! ###"

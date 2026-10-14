@@ -205,7 +205,31 @@ if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
     echo "[OK] Backend aktualisiert."
 fi
 
-# Container neu starten
+# Image erneuern, wenn sich das Dockerfile geaendert hat (z.B. neues Paket wie iproute2 fuer die
+# ARP-Pruefung). Nur dann bauen - das dauert auf dem Pi einige Minuten. Scheitert der Bau, bleiben
+# das alte Dockerfile und Image in Betrieb, das Update laeuft weiter.
+DOCKERFILE_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/docker/Dockerfile"
+if curl -fsSL "$DOCKERFILE_URL" -o "$INSTALL_DIR/Dockerfile.neu"; then
+    if ! cmp -s "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"; then
+        echo "[INFO] Dockerfile geaendert - baue das Image neu (dauert einige Minuten)..."
+        [ -f "$INSTALL_DIR/Dockerfile" ] && cp -f "$INSTALL_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile.alt"
+        mv -f "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"
+        if docker compose build solarmanager; then
+            rm -f "$INSTALL_DIR/Dockerfile.alt"
+            echo "[OK] Image neu gebaut."
+        else
+            echo "[WARNUNG] Image-Bau fehlgeschlagen - altes Image bleibt in Betrieb."
+            if [ -f "$INSTALL_DIR/Dockerfile.alt" ]; then mv -f "$INSTALL_DIR/Dockerfile.alt" "$INSTALL_DIR/Dockerfile"; fi
+        fi
+    else
+        rm -f "$INSTALL_DIR/Dockerfile.neu"
+    fi
+else
+    rm -f "$INSTALL_DIR/Dockerfile.neu"
+    echo "[WARN] Dockerfile nicht von GitHub ladbar - Image bleibt unveraendert."
+fi
+
+# Container neu starten (ein neu gebautes Image ersetzt dabei den Container)
 echo "[INFO] Starte Container neu..."
 docker compose up -d
 docker compose restart solarmanager
