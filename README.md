@@ -25,6 +25,8 @@
 | ![Hochrechnung](images/HochrechnungAnhandDerzeitiegerDaten.jpg) | **Hochrechnung** — Jahresvergleiche inklusive Hochrechnung künftiger Jahre auf Basis der bisher gemessenen Daten |
 | ![Eigene Dashboards](images/ErzeugenEigenerDashboards.jpg) | **Eigene Dashboards (Boards)** — Widget-Katalog, Drag & Drop, Größen- und Stil-Anpassung pro Widget |
 | ![Alternatives Design](images/AlternativesDesign_Dashboard.jpg) | **Alternatives Dashboard-Design** — kompakte Kachel-Ansicht mit Energiefluss, Live-Kennzahlen und Tagesverlauf in einem Bild |
+| ![Smart Home 3D](images/SmartHome3D.jpg) | **Smart Home 3D** *(neu)* — das eigene Haus als 3D-Modell mit Live-Werten: Energiefluss vom Dach über Speicher und Wallbox bis zu den Verbrauchern, Geräte direkt im Raum bedienen (Licht, Rollläden, Thermostate, Fernseher, Saugroboter), Heizung mit Vor-/Rücklauf, frei platzierbare Widgets (Akku, Aktuell-Tabelle, Warmwasser, Tagesverlauf) – auch als Dashboard-Kachel und im Vollbild |
+| ![Smart Home 2D](images/SmartHome2D.jpg) | **Smart Home 2D-Grundriss** *(neu)* — dieselben Live-Daten als Draufsicht: Räume, Möbel und Geräte mit Zustand, Energiefluss entlang der Wände, Karte verschieben und in Vierteln drehen, Geräte direkt schalten |
 
 ---
 
@@ -38,6 +40,7 @@
 - **Verbraucherprognose** — Großverbraucher (Waschmaschine, Spülmaschine, …) in den passenden PV-Zeitraum legen
 - **Preisbasierte Steuerung** — dynamische Tarife (Tibber, aWATTar), § 51 EEG-Nullvergütung, Netzdienliches Laden mit 7-Tage-Plan-Vorschau
 - **Smart Home** — Shelly-Geräte, MQTT, Räume/Etagen mit Grundrissen, Szenen
+- **Smart Home 3D** *(neu)* — Haus im Editor aus Grundriss, Wänden, Fenstern, Türen, Treppen, Dach und PV-Feldern aufbauen, Möbel und Geräte platzieren, Garten gestalten; im 3D Live-Energiefluss, Gerätezustände und -bedienung, Saugroboter mit Position, Wallbox mit Auto und Ladestand, 2D-Grundriss, Rundgang durchs Haus, Widgets am Rand frei verschieben und skalieren
 - **Statistik & Auswertung** — Tages-/Monats-/Jahresvergleiche, kWh und Kosten pro Verbraucher, CO2-Bilanz, Auto-Reichweite & Kosten/100 km
 - **Individuelle Dashboards (Boards)** — frei konfigurierbare Widget-Boards mit Drag & Drop, eigenem Stil-Editor und geräteübergreifender Synchronisation
 - **Simulation (Ladetag)** — interaktive Simulation eines kompletten Ladetags
