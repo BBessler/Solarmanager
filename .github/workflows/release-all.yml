@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
       # 1. Letzte Release-Tags ermitteln
       - name: Letzten Backend-Tag ermitteln
         id: last_backend
@@ -42,12 +45,12 @@ jobs:
           fi
 
           if [ -n "$SINCE" ]; then
-            COMMITS=$(gh api "repos/BBessler/Solarmanager_Backend/commits?since=$SINCE&per_page=100" \
-              --jq '[.[] | "- " + (.commit.message | split("\n")[0])] | join("\n")' 2>/dev/null || true)
+            COMMITS=$(gh api --paginate "repos/BBessler/Solarmanager_Backend/commits?since=$SINCE&per_page=100" \
+              --jq '.[] | select(.commit.message | startswith("Merge ") | not) | "- " + (.commit.message | split("\n")[0])' 2>/dev/null || true)
           else
             # Kein vorheriges Release: letzte 20 Commits
             COMMITS=$(gh api "repos/BBessler/Solarmanager_Backend/commits?per_page=20" \
-              --jq '[.[] | "- " + (.commit.message | split("\n")[0])] | join("\n")' 2>/dev/null || true)
+              --jq '.[] | select(.commit.message | startswith("Merge ") | not) | "- " + (.commit.message | split("\n")[0])' 2>/dev/null || true)
           fi
 
           if [ -z "$COMMITS" ]; then
@@ -74,11 +77,11 @@ jobs:
           fi
 
           if [ -n "$SINCE" ]; then
-            COMMITS=$(gh api "repos/BBessler/solarmanager_Frontend/commits?since=$SINCE&per_page=100" \
-              --jq '[.[] | "- " + (.commit.message | split("\n")[0])] | join("\n")' 2>/dev/null || true)
+            COMMITS=$(gh api --paginate "repos/BBessler/solarmanager_Frontend/commits?since=$SINCE&per_page=100" \
+              --jq '.[] | select(.commit.message | startswith("Merge ") | not) | "- " + (.commit.message | split("\n")[0])' 2>/dev/null || true)
           else
             COMMITS=$(gh api "repos/BBessler/solarmanager_Frontend/commits?per_page=20" \
-              --jq '[.[] | "- " + (.commit.message | split("\n")[0])] | join("\n")' 2>/dev/null || true)
+              --jq '.[] | select(.commit.message | startswith("Merge ") | not) | "- " + (.commit.message | split("\n")[0])' 2>/dev/null || true)
           fi
 
           if [ -z "$COMMITS" ]; then
@@ -200,6 +203,7 @@ jobs:
       - name: Backend-Release-Notes aktualisieren
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           BACKEND_CHANGELOG: ${{ steps.backend_commits.outputs.changelog }}
         run: |
           VERSION=$(date +'%Y.%m.%d')
@@ -213,7 +217,7 @@ jobs:
             exit 0
           fi
 
-          BODY=$(printf '## Backend Änderungen\n%s' "$BACKEND_CHANGELOG")
+          BODY=$(bash .github/scripts/release-notes.sh "Backend Änderungen" <<< "$BACKEND_CHANGELOG")
 
           gh api "repos/BBessler/Solarmanager/releases/$RELEASE_ID" \
             -X PATCH \
@@ -224,6 +228,7 @@ jobs:
       - name: Frontend-Release-Notes aktualisieren
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           FRONTEND_CHANGELOG: ${{ steps.frontend_commits.outputs.changelog }}
         run: |
           VERSION=$(date +'%Y.%m.%d')
@@ -236,7 +241,7 @@ jobs:
             exit 0
           fi
 
-          BODY=$(printf '## Frontend Änderungen\n%s' "$FRONTEND_CHANGELOG")
+          BODY=$(bash .github/scripts/release-notes.sh "Frontend Änderungen" <<< "$FRONTEND_CHANGELOG")
 
           gh api "repos/BBessler/Solarmanager/releases/$RELEASE_ID" \
             -X PATCH \
