@@ -9,7 +9,11 @@
 set -uo pipefail
 
 TITEL="$1"
-COMMITS=$(sed -n 's/^- //p' | grep -v '^Merge ' || true)
+# Merge-Commits und Pflege der KI-Anleitung (CLAUDE.md, .claude/) gehören nicht in die Release-Notes
+# Verweisnummern am Ende ("– #112", "(#123)") sind interne Bezüge, keine Information für Anwender
+# Gefiltert wird VOR Mistral: Kurzfassung und Liste entstehen beide aus COMMITS.
+# "–" ist mehrbytig — als Alternative statt in einer Zeichenklasse, sonst bleibt ein halbes Zeichen stehen.
+COMMITS=$(sed -n 's/^- //p' | grep -v '^Merge ' | grep -vi 'claude'   | sed -E 's/[[:space:]]*(–|-)?[[:space:]]*[(]?#[0-9]+[)]?[[:space:]]*$//' || true)
 
 if [ -z "$COMMITS" ] || [ "$COMMITS" = "Keine neuen Commits" ]; then
   printf '## %s\n- Keine Änderungen\n' "$TITEL"
@@ -41,7 +45,8 @@ Fasse sie in 3 bis 6 Stichpunkten zusammen, die ein Anwender ohne Programmierken
 Bündele zusammengehörige Änderungen zu einem Thema, z. B. "Schnittstellen für die Autos überarbeitet" oder "Neue 3D- und 2D-Ansichten".
 Fasse Fehlerbehebungen in einem Stichpunkt zusammen, sofern es mehrere gibt.
 Lass interne Änderungen (chore, docs, style, test, refactor, ci, build) weg, wenn sie für Anwender keine Wirkung haben.
-Keine Commit-Typen, keine Bereichsnamen in Klammern, keine Personennamen, nichts erfinden.
+Keine Commit-Typen, keine Bereichsnamen in Klammern, keine Personennamen, keine Verweisnummern wie #112, nichts erfinden.
+Lass Änderungen an interner Dokumentation und Entwickler-Anleitungen weg.
 Schreibe Deutsch mit korrekten Umlauten (ä, ö, ü, ß).
 Antworte ausschließlich mit den Stichpunkten. Jede Zeile beginnt mit "- ".'
 
