@@ -9,11 +9,13 @@
 set -uo pipefail
 
 TITEL="$1"
-# Merge-Commits und Pflege der KI-Anleitung (CLAUDE.md, .claude/) gehören nicht in die Release-Notes
-# Verweisnummern am Ende ("– #112", "(#123)") sind interne Bezüge, keine Information für Anwender
-# Gefiltert wird VOR Mistral: Kurzfassung und Liste entstehen beide aus COMMITS.
-# "–" ist mehrbytig — als Alternative statt in einer Zeichenklasse, sonst bleibt ein halbes Zeichen stehen.
-COMMITS=$(sed -n 's/^- //p' | grep -v '^Merge ' | grep -vi 'claude'   | sed -E 's/[[:space:]]*(–|-)?[[:space:]]*[(]?#[0-9]+[)]?[[:space:]]*$//' || true)
+# Gefiltert wird VOR Mistral — Kurzfassung und Liste entstehen beide aus COMMITS:
+# - Merge-Commits und die Pflege der KI-Anleitung (CLAUDE.md, .claude/) fallen heraus.
+# - Verweise werden entfernt: Klammern mit Nummern ("(#91)", "(ersetzt #87, #90)"), eine Nummer am
+#   Ende ("– #112") und mehrstellige Nummern im Text ("von #250/#251"). Einstellige wie "Manuell #2"
+#   bleiben. "–" ist mehrbytig und steht deshalb als Alternative, nicht in einer Zeichenklasse.
+COMMITS=$(sed -n 's/^- //p' | tr -d '\r' | grep -v '^Merge ' | grep -vi 'claude' \
+  | sed -E 's/[[:space:]]*[(][^)]*#[0-9]{2,}[^)]*[)]//g; s/[[:space:]]*(von[[:space:]]+)?#[0-9]{2,}(\/#[0-9]{2,})*//g; s/[[:space:]]*[(]?#[0-9]+[)]?[[:space:]]*$//; s/[[:space:]]+(–|-)[[:space:]]*$//' || true)
 
 if [ -z "$COMMITS" ] || [ "$COMMITS" = "Keine neuen Commits" ]; then
   printf '## %s\n- Keine Änderungen\n' "$TITEL"
