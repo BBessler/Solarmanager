@@ -77,26 +77,43 @@ json.dump(alle, sys.stdout)
     echo "[INFO] $summe Releases geladen."
 }
 
-# Neuestes Release nach Tag-Prefix finden
-# Gibt "tag|url" zurueck
+# Neuestes Release fuer Praefix und Kanal - gibt "tag|url" zurueck.
+# Im Beta-Kanal zaehlen Betas UND normale Releases: Ist das normale Release neuer als die letzte
+# Beta, wird es installiert (Vorgabe 21.10.2026). Sortiert wird nach der Version im Tag, nicht nach
+# der Reihenfolge der API - Releases werden teils Tage vor der Veroeffentlichung angelegt.
+# Gleiche Version: im Beta-Kanal die Beta. Gleiche Regel wie UpdateCheckService.NeuestesRelease.
 sm_get_latest() {
     local tag_prefix="$1"
     local channel="${2:-stable}"
     echo "$SM_RELEASES" | python3 -c "
 import sys, json
 releases = json.load(sys.stdin)
-channel = '$channel'
-for r in releases:
+channel = sys.argv[1]
+praefix = sys.argv[2]
+stabil = praefix[len('beta-'):] if praefix.startswith('beta-') else praefix
+beta = 'beta-' + stabil
+
+def version(tag):
+    try:
+        return tuple(int(t) for t in tag.rsplit('-', 1)[1].split('.'))
+    except Exception:
+        return ()
+
+kandidaten = []
+for i, r in enumerate(releases):
     is_pre = r.get('prerelease', False)
-    if channel == 'beta' and not is_pre:
-        continue
-    if channel == 'stable' and is_pre:
-        continue
-    if r['tag_name'].startswith('$tag_prefix'):
-        url = r['assets'][0]['browser_download_url'] if r['assets'] else ''
-        print(r['tag_name'] + '|' + url)
-        break
-" 2>/dev/null
+    tag = r['tag_name']
+    if not is_pre and tag.startswith(stabil):
+        kandidaten.append((version(tag), 0 if channel == 'stable' else 1, i, r))
+    elif channel == 'beta' and is_pre and tag.startswith(beta):
+        kandidaten.append((version(tag), 0, i, r))
+
+if kandidaten:
+    kandidaten.sort(key=lambda k: (tuple(-x for x in k[0]), k[1], k[2]))
+    r = kandidaten[0][3]
+    url = r['assets'][0]['browser_download_url'] if r['assets'] else ''
+    print(r['tag_name'] + '|' + url)
+" "$channel" "$tag_prefix" 2>/dev/null
 }
 
 # Einen vom Aufrufer uebergebenen Tag aufloesen - tolerant gegenueber kaputten Aufrufern.
