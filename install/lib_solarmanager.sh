@@ -248,3 +248,134 @@ sm_health_check() {
     echo ""
     return 1
 }
+
+# =============================================================================
+# .NET-Laufzeit (Issue Backend #403, Umstellung auf .NET 10)
+#
+# Die Releases sind framework-abhaengig: Das Backend startet nur, wenn die ASP.NET Core
+# Runtime seiner Hauptversion installiert ist. Die Update-Skripte stellen sie deshalb VOR dem
+# Austausch des Backends sicher. Klappt das nicht, wird das Backend nicht getauscht und die
+# alte Version laeuft weiter.
+#
+# Installiert wird neben die vorhandenen Laufzeiten (.NET 9 bleibt), mit Microsofts
+# dotnet-install.sh in das Verzeichnis des vorhandenen "dotnet". Neuinstallation: /opt/dotnet
+# mit Link /usr/local/bin/dotnet, wie bisher das Fremdskript dotnet9pi.
+#
+# Beim naechsten Wechsel (.NET 12) nur SM_DOTNET_KANAL anheben.
+# =============================================================================
+SM_DOTNET_KANAL="10.0"
+
+# Kennt dieses "dotnet" die Laufzeit Microsoft.AspNetCore.App <kanal>.x?
+# Usage: sm_dotnet_hat_laufzeit dotnet_bin [kanal]
+sm_dotnet_hat_laufzeit() {
+    local dotnet_bin="$1" kanal="${2:-$SM_DOTNET_KANAL}"
+    [ -n "$dotnet_bin" ] || return 1
+    "$dotnet_bin" --list-runtimes 2>/dev/null | grep -q "^Microsoft\.AspNetCore\.App ${kanal//./\\.}\."
+}
+
+# Architektur fuer dotnet-install.sh (arm64, arm, x64), leer = nicht unterstuetzt.
+# Massgeblich ist das Userland, nicht der Kernel: 32-Bit-Raspberry-Pi-OS laeuft auf Pi 4/5 oft
+# mit 64-Bit-Kernel, "uname -m" meldet dort aarch64. Ebenso ein arm32-Container auf arm64-Host.
+sm_dotnet_architektur() {
+    local arch=""
+    if command -v dpkg > /dev/null 2>&1; then
+        case "$(dpkg --print-architecture 2>/dev/null)" in
+            arm64) arch="arm64" ;;
+            armhf) arch="arm" ;;
+            amd64) arch="x64" ;;
+        esac
+    fi
+    if [ -z "$arch" ]; then
+        case "$(uname -m)" in
+            aarch64|arm64)
+                if [ "$(getconf LONG_BIT 2>/dev/null)" = "32" ]; then arch="arm"; else arch="arm64"; fi ;;
+            armv7l|armv8l) arch="arm" ;;
+            x86_64|amd64)  arch="x64" ;;
+        esac
+    fi
+    echo "$arch"
+}
+
+# Reicht die glibc fuer .NET? Mindestversionen laut Microsoft (supported-os.json, .NET 10):
+# arm 2.35, arm64/x64 2.27 - fuer arm dieselbe wie unter .NET 9.
+# Unbekannte Version (kein glibc) blockiert nicht, dann entscheidet die Installation selbst.
+sm_dotnet_glibc_reicht() {
+    local arch="$1" mindest="2.27" ist
+    [ "$arch" = "arm" ] && mindest="2.35"
+    ist=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+    [ -z "$ist" ] && return 0
+    if [ "$(printf '%s\n%s\n' "$mindest" "$ist" | sort -V | head -n1)" != "$mindest" ]; then
+        echo "[FEHLER] glibc $ist ist zu alt fuer .NET $SM_DOTNET_KANAL ($arch braucht mindestens $mindest)."
+        echo "[FEHLER] Bitte das Betriebssystem aktualisieren (z. B. Raspberry Pi OS Bookworm)."
+        return 1
+    fi
+    return 0
+}
+
+# Stellt die ASP.NET Core Runtime $SM_DOTNET_KANAL sicher.
+# Usage: sm_dotnet_laufzeit_sicherstellen [use_sudo]
+#   use_sudo=true  native Installation (Skript laeuft als pi oder root)
+#   use_sudo=false im Container (laeuft als root, sudo fehlt dort)
+# Rueckgabe 0 = vorhanden oder installiert, 1 = fehlt -> Backend NICHT tauschen.
+# Setzt SM_DOTNET_NACHINSTALLIERT=true, wenn in diesem Lauf installiert wurde.
+sm_dotnet_laufzeit_sicherstellen() {
+    local use_sudo="${1:-true}" kanal="$SM_DOTNET_KANAL"
+    local sudo_cmd="" dotnet_bin ziel arch skript
+    SM_DOTNET_NACHINSTALLIERT=false
+    if [ "$use_sudo" = "true" ] && [ "$(id -u)" != "0" ]; then
+        sudo_cmd="sudo"
+    fi
+
+    dotnet_bin=$(command -v dotnet 2>/dev/null || true)
+    if sm_dotnet_hat_laufzeit "$dotnet_bin" "$kanal"; then
+        echo "[OK] ASP.NET Core Runtime $kanal ist installiert."
+        return 0
+    fi
+
+    # Ziel: dort, wo das vorhandene "dotnet" wirklich liegt (Link aufloesen), sonst /opt/dotnet.
+    if [ -n "$dotnet_bin" ]; then
+        ziel=$(dirname "$(readlink -f "$dotnet_bin")")
+    else
+        ziel="/opt/dotnet"
+    fi
+
+    arch=$(sm_dotnet_architektur)
+    if [ -z "$arch" ]; then
+        echo "[FEHLER] Prozessor-Architektur $(uname -m) wird von .NET $kanal nicht unterstuetzt."
+        return 1
+    fi
+    sm_dotnet_glibc_reicht "$arch" || return 1
+
+    echo "[INFO] ASP.NET Core Runtime $kanal fehlt - installiere sie ($arch) nach $ziel ..."
+    skript=$(mktemp /tmp/dotnet-install-XXXXXX.sh)
+    if ! curl -fsSL "https://dot.net/v1/dotnet-install.sh" -o "$skript"; then
+        rm -f "$skript"
+        echo "[FEHLER] dotnet-install.sh nicht ladbar (Internet?)."
+        return 1
+    fi
+
+    # Vorhandenes "dotnet" nicht ersetzen (--skip-non-versioned-files): Das alte Backend laeuft
+    # waehrenddessen weiter. Der Starter waehlt die neueste hostfxr aus host/fxr und startet damit
+    # auch .NET-10-Anwendungen. Nur ohne vorhandenes dotnet wird der Starter mit installiert.
+    local ohne_starter=""
+    [ -n "$dotnet_bin" ] && ohne_starter="--skip-non-versioned-files"
+    if ! $sudo_cmd bash "$skript" --runtime aspnetcore --channel "$kanal" --architecture "$arch" \
+            --install-dir "$ziel" --no-path $ohne_starter; then
+        rm -f "$skript"
+        echo "[FEHLER] Installation der ASP.NET Core Runtime $kanal fehlgeschlagen."
+        return 1
+    fi
+    rm -f "$skript"
+
+    if [ -z "$dotnet_bin" ]; then
+        $sudo_cmd ln -sf "$ziel/dotnet" /usr/local/bin/dotnet
+    fi
+
+    if sm_dotnet_hat_laufzeit "$ziel/dotnet" "$kanal"; then
+        SM_DOTNET_NACHINSTALLIERT=true
+        echo "[OK] ASP.NET Core Runtime $kanal installiert."
+        return 0
+    fi
+    echo "[FEHLER] ASP.NET Core Runtime $kanal nach der Installation nicht gefunden."
+    return 1
+}

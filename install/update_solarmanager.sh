@@ -46,6 +46,7 @@ if [ -z "$SM_UPDATE_DETACHED" ] \
     if sudo -n systemd-run --unit=solarmanager-update --collect \
             --description="Solarmanager Update" \
             --setenv=SM_UPDATE_DETACHED=1 \
+            --setenv=SM_SKRIPT_REF="${SM_SKRIPT_REF:-main}" \
             /bin/bash "$0" "$@" > /dev/null 2>&1; then
         echo "[OK] Update laeuft eigenstaendig weiter (Unit: solarmanager-update)."
         exit 0
@@ -100,8 +101,10 @@ trap 'sm_finish $?' EXIT
 # bei jedem Lauf neu; eine Bibliothek daneben kann aber von einem frueheren Update stammen
 # (Backends bis 2026.09 legen beides direkt nach /tmp) und kennt dann neue Funktionen nicht:
 # "sm_aufloesen_tag: command not found". Die Kopie daneben ist nur der Rueckfall ohne GitHub.
+# SM_SKRIPT_REF (Standard main): Branch fuer Bibliothek/Dockerfile, nur zum Testen auf einem
+# Test-Geraet, z. B. SM_SKRIPT_REF=feature/dotnet10-laufzeit ./update_solarmanager.sh --beta
 LIB_DIR="$(dirname "$0")"
-LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh"
+LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/install/lib_solarmanager.sh"
 if curl -fsSL "$LIB_URL" -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
     mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
 else
@@ -246,23 +249,19 @@ else
   fi
 fi
 
-# .NET pruefen und ggf. installieren (vor dem Backend-Tausch, damit der Dienst
-# nicht ohne Runtime dasteht)
-if command -v dotnet &> /dev/null; then
-    echo "[INFO] .NET ist installiert (Version: $(dotnet --version 2>/dev/null || echo 'unbekannt'))."
-else
-    echo "[INFO] .NET ist nicht installiert. Wird jetzt installiert..."
-    curl -fsSL https://raw.githubusercontent.com/pjgpetecodes/dotnet9pi/main/install.sh | sudo bash
-    # Sicherstellen, dass dotnet im PATH ist
-    if [ -d "$HOME/.dotnet" ]; then
-        export PATH="$HOME/.dotnet:$PATH"
-    elif [ -d "/usr/share/dotnet" ]; then
-        export PATH="/usr/share/dotnet:$PATH"
+# .NET-Laufzeit sicherstellen - VOR allem anderen, solange der Dienst noch laeuft: Fehlt die
+# Laufzeit des neuen Backends (ab .NET 10) und laesst sie sich nicht installieren, wird nichts
+# getauscht und die alte Version bleibt in Betrieb (Backend-Issue #403). Vorher pruefte das
+# Skript nur, ob ueberhaupt ein "dotnet" da ist - ein .NET-10-Release haette auf jedem Pi mit
+# .NET 9 nicht mehr gestartet.
+if [ "$BACKEND_CHANGED" = true ]; then
+    if ! type sm_dotnet_laufzeit_sicherstellen > /dev/null 2>&1; then
+        echo "[FEHLER] Die Bibliothek unter $LIB_DIR ist veraltet und GitHub nicht erreichbar."
+        echo "[FEHLER] Bitte $LIB_DIR/lib_solarmanager.sh loeschen und das Update erneut starten."
+        exit 1
     fi
-    if command -v dotnet &> /dev/null; then
-        echo "[OK] .NET $(dotnet --version) erfolgreich installiert."
-    else
-        echo "[FEHLER] .NET-Installation fehlgeschlagen. Bitte manuell installieren."
+    if ! sm_dotnet_laufzeit_sicherstellen true; then
+        echo "[FEHLER] Update abgebrochen - das bisherige Backend laeuft unveraendert weiter."
         exit 1
     fi
 fi

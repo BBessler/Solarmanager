@@ -338,9 +338,29 @@ sudo a2ensite solarmanager-redirect.conf
 sudo a2ensite solarmanager-api-redirect.conf
 sudo systemctl restart apache2
 
+# Shared Library laden - vor der .NET-Installation, die sie nutzt. Immer frisch von GitHub,
+# die Kopie daneben ist nur der Rueckfall (sie kann von einem frueheren Lauf stammen).
+LIB_DIR="$(dirname "$0")"
+if curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/install/lib_solarmanager.sh" \
+        -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
+    mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
+else
+    rm -f "$LIB_DIR/lib_solarmanager.sh.neu"
+fi
+if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
+    echo "[FEHLER] Bibliothek lib_solarmanager.sh fehlt und ist nicht ladbar."
+    exit 1
+fi
+. "$LIB_DIR/lib_solarmanager.sh"
+
 ### 80% .NET Core und Python Installation
 echo_step 80 "Installiere .NET Core und Python APIs..."
-curl -fsSL https://raw.githubusercontent.com/pjgpetecodes/dotnet9pi/main/install.sh | sudo bash
+# ASP.NET Core Runtime ueber Microsofts dotnet-install.sh nach /opt/dotnet (Link /usr/local/bin/dotnet),
+# derselbe Ort wie frueher mit dem Fremdskript dotnet9pi. Nur die Laufzeit, kein SDK (Backend-Issue #403).
+if ! type sm_dotnet_laufzeit_sicherstellen > /dev/null 2>&1 || ! sm_dotnet_laufzeit_sicherstellen true; then
+    echo "[FEHLER] .NET-Laufzeit konnte nicht installiert werden - Installation abgebrochen."
+    exit 1
+fi
 install_if_missing python3 python3-pip python3-dev build-essential libffi-dev libjpeg-dev zlib1g-dev libicu-dev
 sudo pip3 install hyundai-kia-connect-api bimmer_connected --break-system-packages
 
@@ -349,14 +369,7 @@ echo_step 83 "Lade Solarmanager Backend und Frontend von GitHub herunter..."
 
 WEB_DIR="/var/www/html"
 
-# Shared Library laden
-LIB_DIR="$(dirname "$0")"
-if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
-    curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh" \
-        -o "$LIB_DIR/lib_solarmanager.sh"
-fi
-. "$LIB_DIR/lib_solarmanager.sh"
-
+# Die Shared Library ist schon geladen (vor der .NET-Installation, Schritt 80 %).
 sm_fetch_releases || exit 1
 
 # Backend herunterladen

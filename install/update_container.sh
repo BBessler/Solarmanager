@@ -60,7 +60,7 @@ trap 'sm_finish $?' EXIT
 # (Backends bis 2026.09 legen beides direkt nach /tmp) und kennt dann neue Funktionen nicht:
 # "sm_aufloesen_tag: command not found". Die Kopie daneben ist nur der Rueckfall ohne GitHub.
 LIB_DIR="$(dirname "$0")"
-LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh"
+LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/install/lib_solarmanager.sh"
 if curl -fsSL "$LIB_URL" -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
     mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
 else
@@ -154,6 +154,25 @@ fi
 
 echo "[AUTO] Update wird durchgefuehrt..."
 
+# .NET-Laufzeit im Container sicherstellen, BEVOR etwas getauscht wird (Backend-Issue #403).
+# Die Laufzeit kommt aus dem Image, die Anwendung aus ./app. Dieses Update tauscht nur die
+# Anwendung: Ein .NET-10-Backend in einem Image mit .NET 9 startet nicht, der Container
+# liefe in einer Neustart-Schleife und die Oberflaeche waere weg. Deshalb hier nachinstallieren
+# (in die Schreibschicht des Containers; sie bleibt bei jedem Neustart erhalten, erst ein neu
+# erzeugter Container verliert sie). Dauerhaft bringt sie update_docker.sh mit dem neuen Image.
+if [ "$BACKEND_CHANGED" = true ]; then
+    if ! type sm_dotnet_laufzeit_sicherstellen > /dev/null 2>&1; then
+        echo "[FEHLER] Die Bibliothek unter $LIB_DIR ist veraltet und GitHub nicht erreichbar."
+        echo "[FEHLER] Bitte $LIB_DIR/lib_solarmanager.sh loeschen und das Update erneut starten."
+        exit 1
+    fi
+    if ! sm_dotnet_laufzeit_sicherstellen false; then
+        echo "[FEHLER] Update abgebrochen - das bisherige Backend laeuft unveraendert weiter."
+        echo "[FEHLER] Abhilfe: auf dem Host einmal ~/solarmanager/update_docker.sh ausfuehren (baut das Image neu)."
+        exit 1
+    fi
+fi
+
 # Frontend zuerst: statische Dateien, beruehrt den laufenden Prozess nicht.
 if [ "$FRONTEND_CHANGED" = true ] && [ -n "$LATEST_FRONTEND_URL" ]; then
     echo "[INFO] Frontend aktualisieren: $LATEST_FRONTEND_TAG..."
@@ -214,6 +233,11 @@ fi
 # update_docker.sh auf dem Host neu ein.
 if ! command -v ip > /dev/null 2>&1; then
     echo "[HINWEIS] Image veraltet (iproute2 fehlt): einmal auf dem Host ~/solarmanager/update_docker.sh ausfuehren."
+elif [ "${SM_DOTNET_NACHINSTALLIERT:-false}" = true ]; then
+    # Die nachinstallierte Laufzeit liegt nur im Container. Wird er neu erzeugt (z. B. nach einer
+    # Aenderung an docker-compose.yml), fehlt sie wieder - dann startet das Backend nicht.
+    echo "[HINWEIS] .NET $SM_DOTNET_KANAL wurde nur im Container nachinstalliert."
+    echo "[HINWEIS] Bitte bald einmal auf dem Host ~/solarmanager/update_docker.sh ausfuehren (neues Image)."
 fi
 
 # Anwendung beenden - Docker restart-policy startet den Container neu

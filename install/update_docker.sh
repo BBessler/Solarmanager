@@ -29,7 +29,7 @@ VERSION_FILE="$INSTALL_DIR/app/.solarmanager_versions"
 # von einem frueheren Lauf stammen und kennt dann neue Funktionen nicht. Die Kopie daneben
 # ist nur der Rueckfall ohne GitHub.
 LIB_DIR="$(dirname "$0")"
-LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh"
+LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/install/lib_solarmanager.sh"
 if curl -fsSL "$LIB_URL" -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
     mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
 else
@@ -146,25 +146,53 @@ if [ "$FORCE" = true ]; then
     FRONTEND_CHANGED=true
 fi
 
+# Liegt auf GitHub ein geaendertes Dockerfile (neues Paket, neue .NET-Version)? Laedt es nach
+# Dockerfile.neu; Rueckgabe 0 = geaendert. Ohne GitHub bleibt das Image unveraendert.
+DOCKERFILE_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/docker/Dockerfile"
+sm_dockerfile_geaendert() {
+    if ! curl -fsSL "$DOCKERFILE_URL" -o "$INSTALL_DIR/Dockerfile.neu"; then
+        rm -f "$INSTALL_DIR/Dockerfile.neu"
+        echo "[WARN] Dockerfile nicht von GitHub ladbar - Image bleibt unveraendert."
+        return 1
+    fi
+    if cmp -s "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"; then
+        rm -f "$INSTALL_DIR/Dockerfile.neu"
+        return 1
+    fi
+    return 0
+}
+
+IMAGE_VERALTET=false
+if sm_dockerfile_geaendert; then
+    IMAGE_VERALTET=true
+fi
+
 if [ "$BACKEND_CHANGED" = false ] && [ "$FRONTEND_CHANGED" = false ]; then
-    echo "[INFO] Alles aktuell."
-    if [ "$AUTO_MODE" = true ]; then
-        exit 0
+    if [ "$IMAGE_VERALTET" = true ]; then
+        # Backend und Frontend aktuell, das Image nicht: z. B. nach dem Update ueber die
+        # Oberflaeche, die nur die Anwendung tauscht (Wechsel auf .NET 10, Backend-Issue #403).
+        echo "[INFO] Backend und Frontend sind aktuell, das Docker-Image nicht - es wird erneuert."
+    else
+        echo "[INFO] Alles aktuell."
+        if [ "$AUTO_MODE" = true ]; then
+            exit 0
+        fi
+        read -p "Trotzdem neu installieren? (j/n) [n]: " CONFIRM
+        CONFIRM="${CONFIRM:-n}"
+        if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
+            echo "[INFO] Abgebrochen."
+            exit 0
+        fi
+        # Bei Reinstall alles herunterladen
+        BACKEND_CHANGED=true
+        FRONTEND_CHANGED=true
     fi
-    read -p "Trotzdem neu installieren? (j/n) [n]: " CONFIRM
-    CONFIRM="${CONFIRM:-n}"
-    if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
-        echo "[INFO] Abgebrochen."
-        exit 0
-    fi
-    # Bei Reinstall alles herunterladen
-    BACKEND_CHANGED=true
-    FRONTEND_CHANGED=true
 else
     if [ "$AUTO_MODE" = false ]; then
         read -p "Update jetzt durchfuehren? (j/n) [j]: " CONFIRM
         CONFIRM="${CONFIRM:-j}"
         if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
+            rm -f "$INSTALL_DIR/Dockerfile.neu"
             echo "[INFO] Update abgebrochen."
             exit 0
         fi
@@ -190,9 +218,38 @@ CFGEOF
     echo "[OK] Frontend aktualisiert."
 fi
 
-# Backend aktualisieren (nur wenn geaendert). Container vorher stoppen: wird
-# ueber die Dateien des laufenden Prozesses entpackt, stirbt er mitten drin.
+# Image erneuern, wenn sich das Dockerfile geaendert hat - VOR dem Backend-Tausch (Backend-Issue
+# #403): Die .NET-Laufzeit kommt aus dem Image. Frueher wurde erst getauscht und dann gebaut;
+# scheiterte der Bau, stand ein .NET-10-Backend in einem .NET-9-Image und startete nicht.
+# Das Bauen dauert auf dem Pi einige Minuten. Scheitert es, bleiben altes Dockerfile und Image.
+if [ "$IMAGE_VERALTET" = true ]; then
+    echo "[INFO] Dockerfile geaendert - baue das Image neu (dauert einige Minuten)..."
+    [ -f "$INSTALL_DIR/Dockerfile" ] && cp -f "$INSTALL_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile.alt"
+    mv -f "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"
+    if docker compose build solarmanager; then
+        rm -f "$INSTALL_DIR/Dockerfile.alt"
+        echo "[OK] Image neu gebaut."
+    else
+        echo "[WARNUNG] Image-Bau fehlgeschlagen - altes Image bleibt in Betrieb."
+        if [ -f "$INSTALL_DIR/Dockerfile.alt" ]; then mv -f "$INSTALL_DIR/Dockerfile.alt" "$INSTALL_DIR/Dockerfile"; fi
+    fi
+fi
+
+# Backend aktualisieren (nur wenn geaendert). Vorher pruefen, ob das Image die .NET-Laufzeit
+# des Backends hat - sonst nicht tauschen, das alte Backend laeuft weiter.
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+    DOTNET_KANAL="${SM_DOTNET_KANAL:-10.0}"
+    LAUFZEITEN=$(docker compose run --rm --no-deps --entrypoint dotnet solarmanager --list-runtimes 2>/dev/null || true)
+    if ! echo "$LAUFZEITEN" | grep -q "^Microsoft\.AspNetCore\.App ${DOTNET_KANAL}\."; then
+        echo "[FEHLER] Im Docker-Image fehlt die ASP.NET Core Runtime $DOTNET_KANAL."
+        echo "[FEHLER] Backend nicht getauscht - das bisherige laeuft weiter. Image-Bau pruefen:"
+        echo "         cd $INSTALL_DIR && docker compose build solarmanager"
+        docker compose up -d || true
+        exit 1
+    fi
+
+    # Container vorher stoppen: wird ueber die Dateien des laufenden Prozesses entpackt,
+    # stirbt er mitten drin.
     echo "[INFO] Stoppe Container fuer den Backend-Tausch..."
     docker compose stop solarmanager || true
 
@@ -203,30 +260,6 @@ if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
         exit 1
     fi
     echo "[OK] Backend aktualisiert."
-fi
-
-# Image erneuern, wenn sich das Dockerfile geaendert hat (z.B. neues Paket wie iproute2 fuer die
-# ARP-Pruefung). Nur dann bauen - das dauert auf dem Pi einige Minuten. Scheitert der Bau, bleiben
-# das alte Dockerfile und Image in Betrieb, das Update laeuft weiter.
-DOCKERFILE_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/docker/Dockerfile"
-if curl -fsSL "$DOCKERFILE_URL" -o "$INSTALL_DIR/Dockerfile.neu"; then
-    if ! cmp -s "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"; then
-        echo "[INFO] Dockerfile geaendert - baue das Image neu (dauert einige Minuten)..."
-        [ -f "$INSTALL_DIR/Dockerfile" ] && cp -f "$INSTALL_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile.alt"
-        mv -f "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"
-        if docker compose build solarmanager; then
-            rm -f "$INSTALL_DIR/Dockerfile.alt"
-            echo "[OK] Image neu gebaut."
-        else
-            echo "[WARNUNG] Image-Bau fehlgeschlagen - altes Image bleibt in Betrieb."
-            if [ -f "$INSTALL_DIR/Dockerfile.alt" ]; then mv -f "$INSTALL_DIR/Dockerfile.alt" "$INSTALL_DIR/Dockerfile"; fi
-        fi
-    else
-        rm -f "$INSTALL_DIR/Dockerfile.neu"
-    fi
-else
-    rm -f "$INSTALL_DIR/Dockerfile.neu"
-    echo "[WARN] Dockerfile nicht von GitHub ladbar - Image bleibt unveraendert."
 fi
 
 # Container neu starten (ein neu gebautes Image ersetzt dabei den Container)
