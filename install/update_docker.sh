@@ -29,7 +29,7 @@ VERSION_FILE="$INSTALL_DIR/app/.solarmanager_versions"
 # von einem frueheren Lauf stammen und kennt dann neue Funktionen nicht. Die Kopie daneben
 # ist nur der Rueckfall ohne GitHub.
 LIB_DIR="$(dirname "$0")"
-LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh"
+LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/install/lib_solarmanager.sh"
 if curl -fsSL "$LIB_URL" -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
     mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
 else
@@ -41,6 +41,11 @@ if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
     exit 1
 fi
 . "$LIB_DIR/lib_solarmanager.sh"
+if ! type sm_extract > /dev/null 2>&1 || ! type sm_dotnet_kanal_aus_archiv > /dev/null 2>&1; then
+    echo "[FEHLER] Die Bibliothek unter $LIB_DIR ist veraltet und GitHub nicht erreichbar."
+    echo "[FEHLER] Bitte $LIB_DIR/lib_solarmanager.sh loeschen und das Update erneut starten."
+    exit 1
+fi
 
 if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
     echo "FEHLER: $INSTALL_DIR/docker-compose.yml nicht gefunden."
@@ -146,25 +151,103 @@ if [ "$FORCE" = true ]; then
     FRONTEND_CHANGED=true
 fi
 
+# Liegt auf GitHub ein geaendertes Dockerfile (neues Paket, neue .NET-Version)? Laedt es nach
+# Dockerfile.neu; Rueckgabe 0 = geaendert. Ohne GitHub bleibt das Image unveraendert.
+DOCKERFILE_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/docker/Dockerfile"
+sm_dockerfile_geaendert() {
+    if ! curl -fsSL "$DOCKERFILE_URL" -o "$INSTALL_DIR/Dockerfile.neu"; then
+        rm -f "$INSTALL_DIR/Dockerfile.neu"
+        echo "[WARN] Dockerfile nicht von GitHub ladbar - Image bleibt unveraendert."
+        return 1
+    fi
+    if cmp -s "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"; then
+        rm -f "$INSTALL_DIR/Dockerfile.neu"
+        return 1
+    fi
+    return 0
+}
+
+# Hat das Image die ASP.NET Core Runtime <kanal>?
+# Rueckgabe 0 = ja (auch bei leerem Kanal), 1 = fehlt, 2 = keine Aussage (Pruefung gescheitert).
+# "Keine Aussage" ist bewusst nicht "fehlt": Sonst baute ein Fehler der Pruefung bei jedem Lauf das
+# Image neu und sperrte den Backend-Tausch auch auf stabilen Geraeten. Eigener Name fuer den
+# Pruef-Container, weil der Dienst container_name "solarmanager" traegt.
+sm_image_hat_laufzeit() {
+    local kanal="$1" laufzeiten
+    [ -n "$kanal" ] || return 0
+    laufzeiten=$(docker compose run --rm --no-deps --name "solarmanager-laufzeitpruefung-$$" \
+        --entrypoint dotnet solarmanager --list-runtimes 2>/dev/null || true)
+    if ! echo "$laufzeiten" | grep -q "^Microsoft\.NETCore\.App "; then
+        echo "[WARN] Laufzeiten im Image nicht pruefbar (docker compose run)." >&2
+        return 2
+    fi
+    echo "$laufzeiten" | grep -q "^Microsoft\.AspNetCore\.App ${kanal//./\\.}\." && return 0
+    return 1
+}
+
+# Image bauen. Die .NET-Laufzeit des Backends geht als DOTNET_ZUSATZ mit: Das Dockerfile legt sie
+# zusaetzlich ins Image, wenn das Basis-Image sie nicht hat (.NET 10 vorerst nur Beta, #403).
+# Scheitert der Bau, bleiben altes Dockerfile und Image.
+sm_image_bauen() {
+    local kanal="$1"
+    if [ -f "$INSTALL_DIR/Dockerfile.neu" ]; then
+        [ -f "$INSTALL_DIR/Dockerfile" ] && cp -f "$INSTALL_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile.alt"
+        mv -f "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"
+    fi
+    echo "[INFO] Baue das Image neu (dauert einige Minuten)..."
+    if docker compose build --build-arg DOTNET_ZUSATZ="$kanal" solarmanager; then
+        rm -f "$INSTALL_DIR/Dockerfile.alt"
+        echo "[OK] Image neu gebaut."
+        return 0
+    fi
+    echo "[WARNUNG] Image-Bau fehlgeschlagen - altes Image bleibt in Betrieb."
+    if [ -f "$INSTALL_DIR/Dockerfile.alt" ]; then mv -f "$INSTALL_DIR/Dockerfile.alt" "$INSTALL_DIR/Dockerfile"; fi
+    return 1
+}
+
+# Welche .NET-Laufzeit braucht das installierte Backend (runtimeconfig in ./app)?
+DOTNET_INSTALLIERT=""
+if type sm_dotnet_kanal_aus_verzeichnis > /dev/null 2>&1; then
+    DOTNET_INSTALLIERT=$(sm_dotnet_kanal_aus_verzeichnis "$INSTALL_DIR/app")
+fi
+
+IMAGE_VERALTET=false
+if sm_dockerfile_geaendert; then
+    IMAGE_VERALTET=true
+fi
+# Laufzeit nur im Container nachinstalliert (Update ueber die Oberflaeche)? Dann fehlt sie im
+# Image, und ein neu erzeugter Container startete das Backend nicht mehr.
+PRUEF_RC=0
+sm_image_hat_laufzeit "$DOTNET_INSTALLIERT" || PRUEF_RC=$?
+if [ "$PRUEF_RC" -eq 1 ]; then
+    echo "[INFO] Dem Image fehlt die ASP.NET Core Runtime $DOTNET_INSTALLIERT des installierten Backends."
+    IMAGE_VERALTET=true
+fi
+
 if [ "$BACKEND_CHANGED" = false ] && [ "$FRONTEND_CHANGED" = false ]; then
-    echo "[INFO] Alles aktuell."
-    if [ "$AUTO_MODE" = true ]; then
-        exit 0
+    if [ "$IMAGE_VERALTET" = true ]; then
+        echo "[INFO] Backend und Frontend sind aktuell, das Docker-Image nicht - es wird erneuert."
+    else
+        echo "[INFO] Alles aktuell."
+        if [ "$AUTO_MODE" = true ]; then
+            exit 0
+        fi
+        read -p "Trotzdem neu installieren? (j/n) [n]: " CONFIRM
+        CONFIRM="${CONFIRM:-n}"
+        if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
+            echo "[INFO] Abgebrochen."
+            exit 0
+        fi
+        # Bei Reinstall alles herunterladen
+        BACKEND_CHANGED=true
+        FRONTEND_CHANGED=true
     fi
-    read -p "Trotzdem neu installieren? (j/n) [n]: " CONFIRM
-    CONFIRM="${CONFIRM:-n}"
-    if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
-        echo "[INFO] Abgebrochen."
-        exit 0
-    fi
-    # Bei Reinstall alles herunterladen
-    BACKEND_CHANGED=true
-    FRONTEND_CHANGED=true
 else
     if [ "$AUTO_MODE" = false ]; then
         read -p "Update jetzt durchfuehren? (j/n) [j]: " CONFIRM
         CONFIRM="${CONFIRM:-j}"
         if [[ ! "$CONFIRM" =~ ^[Jj]$ ]]; then
+            rm -f "$INSTALL_DIR/Dockerfile.neu"
             echo "[INFO] Update abgebrochen."
             exit 0
         fi
@@ -190,43 +273,60 @@ CFGEOF
     echo "[OK] Frontend aktualisiert."
 fi
 
-# Backend aktualisieren (nur wenn geaendert). Container vorher stoppen: wird
-# ueber die Dateien des laufenden Prozesses entpackt, stirbt er mitten drin.
+# Benoetigte .NET-Laufzeit: die des neuen Backends (aus dem Archiv), sonst die des installierten.
+DOTNET_BENOETIGT="$DOTNET_INSTALLIERT"
+BACKEND_ARCHIV=""
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+    BACKEND_ARCHIV="/tmp/sm-backend-$$.tar.gz"
+    trap 'rm -f "$BACKEND_ARCHIV"' EXIT
+    echo "[INFO] Lade Backend $LATEST_BACKEND_TAG herunter..."
+    sm_download "$LATEST_BACKEND_URL" "$BACKEND_ARCHIV" || exit 1
+    DOTNET_BENOETIGT=$(sm_dotnet_kanal_aus_archiv "$BACKEND_ARCHIV")
+    echo "[INFO] Das Backend braucht ASP.NET Core ${DOTNET_BENOETIGT:-(unbekannt)}."
+    if [ "$DOTNET_BENOETIGT" != "$DOTNET_INSTALLIERT" ]; then
+        PRUEF_RC=0
+        sm_image_hat_laufzeit "$DOTNET_BENOETIGT" || PRUEF_RC=$?
+        [ "$PRUEF_RC" -eq 1 ] && IMAGE_VERALTET=true
+    fi
+fi
+
+# Image erneuern - VOR dem Backend-Tausch (Backend-Issue #403): Die .NET-Laufzeit kommt aus dem
+# Image. Frueher wurde erst getauscht und dann gebaut; scheiterte der Bau, stand ein .NET-10-Backend
+# in einem .NET-9-Image und startete nicht.
+if [ "$IMAGE_VERALTET" = true ]; then
+    sm_image_bauen "$DOTNET_BENOETIGT" || true
+fi
+
+# Backend aktualisieren (nur wenn geaendert). Braucht das neue Backend eine andere Laufzeit als das
+# laufende, vorher pruefen, ob das Image sie hat - sonst (oder ohne Aussage) nicht tauschen, das
+# alte Backend laeuft weiter. Gleiche Laufzeit wie bisher: keine Pruefung, das laufende Backend
+# zeigt, dass sie da ist (stabile Geraete werden so nie durch die Pruefung blockiert).
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+    PRUEF_RC=0
+    if [ "$DOTNET_BENOETIGT" != "$DOTNET_INSTALLIERT" ]; then
+        sm_image_hat_laufzeit "$DOTNET_BENOETIGT" || PRUEF_RC=$?
+    fi
+    if [ "$PRUEF_RC" -ne 0 ]; then
+        echo "[FEHLER] Im Docker-Image fehlt die ASP.NET Core Runtime $DOTNET_BENOETIGT (oder sie ist nicht pruefbar)."
+        echo "[FEHLER] Backend nicht getauscht - das bisherige laeuft weiter. Image-Bau pruefen:"
+        echo "         cd $INSTALL_DIR && docker compose build --build-arg DOTNET_ZUSATZ=$DOTNET_BENOETIGT solarmanager"
+        docker compose up -d || true
+        exit 1
+    fi
+
+    # Container vorher stoppen: wird ueber die Dateien des laufenden Prozesses entpackt,
+    # stirbt er mitten drin.
     echo "[INFO] Stoppe Container fuer den Backend-Tausch..."
     docker compose stop solarmanager || true
 
     echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-    if ! sm_download_and_extract "$LATEST_BACKEND_URL" "$INSTALL_DIR/app"; then
+    if ! sm_extract "$BACKEND_ARCHIV" "$INSTALL_DIR/app"; then
         echo "[FEHLER] Backend-Update fehlgeschlagen - starte Container wieder..."
         docker compose up -d || true
         exit 1
     fi
+    rm -f "$BACKEND_ARCHIV"
     echo "[OK] Backend aktualisiert."
-fi
-
-# Image erneuern, wenn sich das Dockerfile geaendert hat (z.B. neues Paket wie iproute2 fuer die
-# ARP-Pruefung). Nur dann bauen - das dauert auf dem Pi einige Minuten. Scheitert der Bau, bleiben
-# das alte Dockerfile und Image in Betrieb, das Update laeuft weiter.
-DOCKERFILE_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/docker/Dockerfile"
-if curl -fsSL "$DOCKERFILE_URL" -o "$INSTALL_DIR/Dockerfile.neu"; then
-    if ! cmp -s "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"; then
-        echo "[INFO] Dockerfile geaendert - baue das Image neu (dauert einige Minuten)..."
-        [ -f "$INSTALL_DIR/Dockerfile" ] && cp -f "$INSTALL_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile.alt"
-        mv -f "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"
-        if docker compose build solarmanager; then
-            rm -f "$INSTALL_DIR/Dockerfile.alt"
-            echo "[OK] Image neu gebaut."
-        else
-            echo "[WARNUNG] Image-Bau fehlgeschlagen - altes Image bleibt in Betrieb."
-            if [ -f "$INSTALL_DIR/Dockerfile.alt" ]; then mv -f "$INSTALL_DIR/Dockerfile.alt" "$INSTALL_DIR/Dockerfile"; fi
-        fi
-    else
-        rm -f "$INSTALL_DIR/Dockerfile.neu"
-    fi
-else
-    rm -f "$INSTALL_DIR/Dockerfile.neu"
-    echo "[WARN] Dockerfile nicht von GitHub ladbar - Image bleibt unveraendert."
 fi
 
 # Container neu starten (ein neu gebautes Image ersetzt dabei den Container)

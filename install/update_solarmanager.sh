@@ -46,6 +46,7 @@ if [ -z "$SM_UPDATE_DETACHED" ] \
     if sudo -n systemd-run --unit=solarmanager-update --collect \
             --description="Solarmanager Update" \
             --setenv=SM_UPDATE_DETACHED=1 \
+            --setenv=SM_SKRIPT_REF="${SM_SKRIPT_REF:-main}" \
             /bin/bash "$0" "$@" > /dev/null 2>&1; then
         echo "[OK] Update laeuft eigenstaendig weiter (Unit: solarmanager-update)."
         exit 0
@@ -87,6 +88,7 @@ sm_finish() {
         sudo systemctl start "$SERVICE" || true
     fi
 
+    rm -f "${BACKEND_ARCHIV:-}"
     sleep 1   # letzte Zeilen durch tee flushen lassen
     if [ "$code" -eq 0 ]; then
         echo "success" > "$STATE_FILE"
@@ -100,8 +102,10 @@ trap 'sm_finish $?' EXIT
 # bei jedem Lauf neu; eine Bibliothek daneben kann aber von einem frueheren Update stammen
 # (Backends bis 2026.09 legen beides direkt nach /tmp) und kennt dann neue Funktionen nicht:
 # "sm_aufloesen_tag: command not found". Die Kopie daneben ist nur der Rueckfall ohne GitHub.
+# SM_SKRIPT_REF (Standard main): Branch fuer Bibliothek/Dockerfile, nur zum Testen auf einem
+# Test-Geraet, z. B. SM_SKRIPT_REF=feature/dotnet10-laufzeit ./update_solarmanager.sh --beta
 LIB_DIR="$(dirname "$0")"
-LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh"
+LIB_URL="https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/install/lib_solarmanager.sh"
 if curl -fsSL "$LIB_URL" -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
     mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
 else
@@ -246,23 +250,25 @@ else
   fi
 fi
 
-# .NET pruefen und ggf. installieren (vor dem Backend-Tausch, damit der Dienst
-# nicht ohne Runtime dasteht)
-if command -v dotnet &> /dev/null; then
-    echo "[INFO] .NET ist installiert (Version: $(dotnet --version 2>/dev/null || echo 'unbekannt'))."
-else
-    echo "[INFO] .NET ist nicht installiert. Wird jetzt installiert..."
-    curl -fsSL https://raw.githubusercontent.com/pjgpetecodes/dotnet9pi/main/install.sh | sudo bash
-    # Sicherstellen, dass dotnet im PATH ist
-    if [ -d "$HOME/.dotnet" ]; then
-        export PATH="$HOME/.dotnet:$PATH"
-    elif [ -d "/usr/share/dotnet" ]; then
-        export PATH="/usr/share/dotnet:$PATH"
+# Backend-Archiv zuerst herunterladen und die .NET-Laufzeit sicherstellen, die DIESES Release
+# braucht - VOR allem anderen, solange der Dienst noch laeuft (Backend-Issue #403). Fehlt sie und
+# laesst sie sich nicht installieren, wird nichts getauscht, die alte Version bleibt in Betrieb.
+# Vorher pruefte das Skript nur, ob ueberhaupt ein "dotnet" da ist - ein .NET-10-Release haette
+# auf jedem Pi mit .NET 9 nicht gestartet. Ein .NET-9-Release installiert nichts nach.
+BACKEND_ARCHIV=""
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+    if ! type sm_dotnet_laufzeit_sicherstellen > /dev/null 2>&1 || ! type sm_extract > /dev/null 2>&1; then
+        echo "[FEHLER] Die Bibliothek unter $LIB_DIR ist veraltet und GitHub nicht erreichbar."
+        echo "[FEHLER] Bitte $LIB_DIR/lib_solarmanager.sh loeschen und das Update erneut starten."
+        exit 1
     fi
-    if command -v dotnet &> /dev/null; then
-        echo "[OK] .NET $(dotnet --version) erfolgreich installiert."
-    else
-        echo "[FEHLER] .NET-Installation fehlgeschlagen. Bitte manuell installieren."
+    BACKEND_ARCHIV="/tmp/sm-backend-$$.tar.gz"
+    echo "[INFO] Lade Backend $LATEST_BACKEND_TAG herunter..."
+    sm_download "$LATEST_BACKEND_URL" "$BACKEND_ARCHIV" || exit 1
+    DOTNET_BENOETIGT=$(sm_dotnet_kanal_aus_archiv "$BACKEND_ARCHIV")
+    echo "[INFO] Das Backend braucht ASP.NET Core ${DOTNET_BENOETIGT:-(unbekannt)}."
+    if ! sm_dotnet_laufzeit_sicherstellen true "$DOTNET_BENOETIGT"; then
+        echo "[FEHLER] Update abgebrochen - das bisherige Backend laeuft unveraendert weiter."
         exit 1
     fi
 fi
@@ -299,7 +305,8 @@ if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
   SERVICE_STOPPED=true
 
   echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-  sm_download_and_extract "$LATEST_BACKEND_URL" "$WEB_DIR/backend" "true" || exit 1
+  sm_extract "$BACKEND_ARCHIV" "$WEB_DIR/backend" "true" || exit 1
+  rm -f "$BACKEND_ARCHIV"
   echo "[OK] Backend aktualisiert."
 fi
 

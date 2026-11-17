@@ -338,9 +338,24 @@ sudo a2ensite solarmanager-redirect.conf
 sudo a2ensite solarmanager-api-redirect.conf
 sudo systemctl restart apache2
 
+# Shared Library laden - vor der .NET-Installation, die sie nutzt. Immer frisch von GitHub,
+# die Kopie daneben ist nur der Rueckfall (sie kann von einem frueheren Lauf stammen).
+LIB_DIR="$(dirname "$0")"
+if curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/${SM_SKRIPT_REF:-main}/install/lib_solarmanager.sh" \
+        -o "$LIB_DIR/lib_solarmanager.sh.neu"; then
+    mv -f "$LIB_DIR/lib_solarmanager.sh.neu" "$LIB_DIR/lib_solarmanager.sh"
+else
+    rm -f "$LIB_DIR/lib_solarmanager.sh.neu"
+fi
+if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
+    echo "[FEHLER] Bibliothek lib_solarmanager.sh fehlt und ist nicht ladbar."
+    exit 1
+fi
+. "$LIB_DIR/lib_solarmanager.sh"
+
 ### 80% .NET Core und Python Installation
 echo_step 80 "Installiere .NET Core und Python APIs..."
-curl -fsSL https://raw.githubusercontent.com/pjgpetecodes/dotnet9pi/main/install.sh | sudo bash
+# Die .NET-Laufzeit folgt in Schritt 83 - welche, steht im heruntergeladenen Backend-Release.
 install_if_missing python3 python3-pip python3-dev build-essential libffi-dev libjpeg-dev zlib1g-dev libicu-dev
 sudo pip3 install hyundai-kia-connect-api bimmer_connected --break-system-packages
 
@@ -349,14 +364,7 @@ echo_step 83 "Lade Solarmanager Backend und Frontend von GitHub herunter..."
 
 WEB_DIR="/var/www/html"
 
-# Shared Library laden
-LIB_DIR="$(dirname "$0")"
-if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
-    curl -fsSL "https://raw.githubusercontent.com/BBessler/Solarmanager/main/install/lib_solarmanager.sh" \
-        -o "$LIB_DIR/lib_solarmanager.sh"
-fi
-. "$LIB_DIR/lib_solarmanager.sh"
-
+# Die Shared Library ist schon geladen (vor der .NET-Installation, Schritt 80 %).
 sm_fetch_releases || exit 1
 
 # Backend herunterladen
@@ -364,7 +372,22 @@ BACKEND_INFO=$(sm_get_latest "backend-" "stable")
 BACKEND_TAG=$(echo "$BACKEND_INFO" | cut -d'|' -f1)
 BACKEND_URL=$(echo "$BACKEND_INFO" | cut -d'|' -f2)
 echo "[INFO] Lade Backend $BACKEND_TAG herunter..."
-sm_download_and_extract "$BACKEND_URL" "$WEB_DIR/backend" "true" || exit 1
+BACKEND_ARCHIV="/tmp/sm-backend-$$.tar.gz"
+sm_download "$BACKEND_URL" "$BACKEND_ARCHIV" || exit 1
+
+# ASP.NET Core Runtime, die dieses Release braucht (runtimeconfig im Archiv), ueber Microsofts
+# dotnet-install.sh nach /opt/dotnet mit Link /usr/local/bin/dotnet - derselbe Ort wie frueher mit
+# dem Fremdskript dotnet9pi. Nur die Laufzeit, kein SDK (Backend-Issue #403). Ohne lesbare
+# runtimeconfig gilt die bisherige Hauptversion 9.0, damit nie ein Pi ohne Laufzeit dasteht.
+DOTNET_BENOETIGT=$(sm_dotnet_kanal_aus_archiv "$BACKEND_ARCHIV")
+if ! sm_dotnet_laufzeit_sicherstellen true "${DOTNET_BENOETIGT:-9.0}"; then
+    rm -f "$BACKEND_ARCHIV"
+    echo "[FEHLER] .NET-Laufzeit konnte nicht installiert werden - Installation abgebrochen."
+    exit 1
+fi
+
+sm_extract "$BACKEND_ARCHIV" "$WEB_DIR/backend" "true" || { rm -f "$BACKEND_ARCHIV"; exit 1; }
+rm -f "$BACKEND_ARCHIV"
 echo "[OK] Backend $BACKEND_TAG installiert."
 
 # Frontend herunterladen
