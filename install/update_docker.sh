@@ -41,6 +41,11 @@ if [ ! -f "$LIB_DIR/lib_solarmanager.sh" ]; then
     exit 1
 fi
 . "$LIB_DIR/lib_solarmanager.sh"
+if ! type sm_extract > /dev/null 2>&1 || ! type sm_dotnet_kanal_aus_archiv > /dev/null 2>&1; then
+    echo "[FEHLER] Die Bibliothek unter $LIB_DIR ist veraltet und GitHub nicht erreichbar."
+    echo "[FEHLER] Bitte $LIB_DIR/lib_solarmanager.sh loeschen und das Update erneut starten."
+    exit 1
+fi
 
 if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
     echo "FEHLER: $INSTALL_DIR/docker-compose.yml nicht gefunden."
@@ -162,15 +167,53 @@ sm_dockerfile_geaendert() {
     return 0
 }
 
+# Hat das Image die ASP.NET Core Runtime <kanal>? Leerer Kanal = keine Aussage (gilt als ja).
+sm_image_hat_laufzeit() {
+    local kanal="$1" laufzeiten
+    [ -n "$kanal" ] || return 0
+    laufzeiten=$(docker compose run --rm --no-deps --entrypoint dotnet solarmanager --list-runtimes 2>/dev/null || true)
+    echo "$laufzeiten" | grep -q "^Microsoft\.AspNetCore\.App ${kanal//./\\.}\."
+}
+
+# Image bauen. Die .NET-Laufzeit des Backends geht als DOTNET_ZUSATZ mit: Das Dockerfile legt sie
+# zusaetzlich ins Image, wenn das Basis-Image sie nicht hat (.NET 10 vorerst nur Beta, #403).
+# Scheitert der Bau, bleiben altes Dockerfile und Image.
+sm_image_bauen() {
+    local kanal="$1"
+    if [ -f "$INSTALL_DIR/Dockerfile.neu" ]; then
+        [ -f "$INSTALL_DIR/Dockerfile" ] && cp -f "$INSTALL_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile.alt"
+        mv -f "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"
+    fi
+    echo "[INFO] Baue das Image neu (dauert einige Minuten)..."
+    if docker compose build --build-arg DOTNET_ZUSATZ="$kanal" solarmanager; then
+        rm -f "$INSTALL_DIR/Dockerfile.alt"
+        echo "[OK] Image neu gebaut."
+        return 0
+    fi
+    echo "[WARNUNG] Image-Bau fehlgeschlagen - altes Image bleibt in Betrieb."
+    if [ -f "$INSTALL_DIR/Dockerfile.alt" ]; then mv -f "$INSTALL_DIR/Dockerfile.alt" "$INSTALL_DIR/Dockerfile"; fi
+    return 1
+}
+
+# Welche .NET-Laufzeit braucht das installierte Backend (runtimeconfig in ./app)?
+DOTNET_INSTALLIERT=""
+if type sm_dotnet_kanal_aus_verzeichnis > /dev/null 2>&1; then
+    DOTNET_INSTALLIERT=$(sm_dotnet_kanal_aus_verzeichnis "$INSTALL_DIR/app")
+fi
+
 IMAGE_VERALTET=false
 if sm_dockerfile_geaendert; then
+    IMAGE_VERALTET=true
+fi
+# Laufzeit nur im Container nachinstalliert (Update ueber die Oberflaeche)? Dann fehlt sie im
+# Image, und ein neu erzeugter Container startete das Backend nicht mehr.
+if [ -n "$DOTNET_INSTALLIERT" ] && ! sm_image_hat_laufzeit "$DOTNET_INSTALLIERT"; then
+    echo "[INFO] Dem Image fehlt die ASP.NET Core Runtime $DOTNET_INSTALLIERT des installierten Backends."
     IMAGE_VERALTET=true
 fi
 
 if [ "$BACKEND_CHANGED" = false ] && [ "$FRONTEND_CHANGED" = false ]; then
     if [ "$IMAGE_VERALTET" = true ]; then
-        # Backend und Frontend aktuell, das Image nicht: z. B. nach dem Update ueber die
-        # Oberflaeche, die nur die Anwendung tauscht (Wechsel auf .NET 10, Backend-Issue #403).
         echo "[INFO] Backend und Frontend sind aktuell, das Docker-Image nicht - es wird erneuert."
     else
         echo "[INFO] Alles aktuell."
@@ -218,32 +261,35 @@ CFGEOF
     echo "[OK] Frontend aktualisiert."
 fi
 
-# Image erneuern, wenn sich das Dockerfile geaendert hat - VOR dem Backend-Tausch (Backend-Issue
-# #403): Die .NET-Laufzeit kommt aus dem Image. Frueher wurde erst getauscht und dann gebaut;
-# scheiterte der Bau, stand ein .NET-10-Backend in einem .NET-9-Image und startete nicht.
-# Das Bauen dauert auf dem Pi einige Minuten. Scheitert es, bleiben altes Dockerfile und Image.
-if [ "$IMAGE_VERALTET" = true ]; then
-    echo "[INFO] Dockerfile geaendert - baue das Image neu (dauert einige Minuten)..."
-    [ -f "$INSTALL_DIR/Dockerfile" ] && cp -f "$INSTALL_DIR/Dockerfile" "$INSTALL_DIR/Dockerfile.alt"
-    mv -f "$INSTALL_DIR/Dockerfile.neu" "$INSTALL_DIR/Dockerfile"
-    if docker compose build solarmanager; then
-        rm -f "$INSTALL_DIR/Dockerfile.alt"
-        echo "[OK] Image neu gebaut."
-    else
-        echo "[WARNUNG] Image-Bau fehlgeschlagen - altes Image bleibt in Betrieb."
-        if [ -f "$INSTALL_DIR/Dockerfile.alt" ]; then mv -f "$INSTALL_DIR/Dockerfile.alt" "$INSTALL_DIR/Dockerfile"; fi
+# Benoetigte .NET-Laufzeit: die des neuen Backends (aus dem Archiv), sonst die des installierten.
+DOTNET_BENOETIGT="$DOTNET_INSTALLIERT"
+BACKEND_ARCHIV=""
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
+    BACKEND_ARCHIV="/tmp/sm-backend-$$.tar.gz"
+    trap 'rm -f "$BACKEND_ARCHIV"' EXIT
+    echo "[INFO] Lade Backend $LATEST_BACKEND_TAG herunter..."
+    sm_download "$LATEST_BACKEND_URL" "$BACKEND_ARCHIV" || exit 1
+    DOTNET_BENOETIGT=$(sm_dotnet_kanal_aus_archiv "$BACKEND_ARCHIV")
+    echo "[INFO] Das Backend braucht ASP.NET Core ${DOTNET_BENOETIGT:-(unbekannt)}."
+    if [ -n "$DOTNET_BENOETIGT" ] && ! sm_image_hat_laufzeit "$DOTNET_BENOETIGT"; then
+        IMAGE_VERALTET=true
     fi
 fi
 
+# Image erneuern - VOR dem Backend-Tausch (Backend-Issue #403): Die .NET-Laufzeit kommt aus dem
+# Image. Frueher wurde erst getauscht und dann gebaut; scheiterte der Bau, stand ein .NET-10-Backend
+# in einem .NET-9-Image und startete nicht.
+if [ "$IMAGE_VERALTET" = true ]; then
+    sm_image_bauen "$DOTNET_BENOETIGT" || true
+fi
+
 # Backend aktualisieren (nur wenn geaendert). Vorher pruefen, ob das Image die .NET-Laufzeit
-# des Backends hat - sonst nicht tauschen, das alte Backend laeuft weiter.
+# des neuen Backends hat - sonst nicht tauschen, das alte Backend laeuft weiter.
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
-    DOTNET_KANAL="${SM_DOTNET_KANAL:-10.0}"
-    LAUFZEITEN=$(docker compose run --rm --no-deps --entrypoint dotnet solarmanager --list-runtimes 2>/dev/null || true)
-    if ! echo "$LAUFZEITEN" | grep -q "^Microsoft\.AspNetCore\.App ${DOTNET_KANAL}\."; then
-        echo "[FEHLER] Im Docker-Image fehlt die ASP.NET Core Runtime $DOTNET_KANAL."
+    if ! sm_image_hat_laufzeit "$DOTNET_BENOETIGT"; then
+        echo "[FEHLER] Im Docker-Image fehlt die ASP.NET Core Runtime $DOTNET_BENOETIGT."
         echo "[FEHLER] Backend nicht getauscht - das bisherige laeuft weiter. Image-Bau pruefen:"
-        echo "         cd $INSTALL_DIR && docker compose build solarmanager"
+        echo "         cd $INSTALL_DIR && docker compose build --build-arg DOTNET_ZUSATZ=$DOTNET_BENOETIGT solarmanager"
         docker compose up -d || true
         exit 1
     fi
@@ -254,11 +300,12 @@ if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
     docker compose stop solarmanager || true
 
     echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-    if ! sm_download_and_extract "$LATEST_BACKEND_URL" "$INSTALL_DIR/app"; then
+    if ! sm_extract "$BACKEND_ARCHIV" "$INSTALL_DIR/app"; then
         echo "[FEHLER] Backend-Update fehlgeschlagen - starte Container wieder..."
         docker compose up -d || true
         exit 1
     fi
+    rm -f "$BACKEND_ARCHIV"
     echo "[OK] Backend aktualisiert."
 fi
 

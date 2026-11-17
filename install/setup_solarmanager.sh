@@ -355,12 +355,7 @@ fi
 
 ### 80% .NET Core und Python Installation
 echo_step 80 "Installiere .NET Core und Python APIs..."
-# ASP.NET Core Runtime ueber Microsofts dotnet-install.sh nach /opt/dotnet (Link /usr/local/bin/dotnet),
-# derselbe Ort wie frueher mit dem Fremdskript dotnet9pi. Nur die Laufzeit, kein SDK (Backend-Issue #403).
-if ! type sm_dotnet_laufzeit_sicherstellen > /dev/null 2>&1 || ! sm_dotnet_laufzeit_sicherstellen true; then
-    echo "[FEHLER] .NET-Laufzeit konnte nicht installiert werden - Installation abgebrochen."
-    exit 1
-fi
+# Die .NET-Laufzeit folgt in Schritt 83 - welche, steht im heruntergeladenen Backend-Release.
 install_if_missing python3 python3-pip python3-dev build-essential libffi-dev libjpeg-dev zlib1g-dev libicu-dev
 sudo pip3 install hyundai-kia-connect-api bimmer_connected --break-system-packages
 
@@ -377,7 +372,22 @@ BACKEND_INFO=$(sm_get_latest "backend-" "stable")
 BACKEND_TAG=$(echo "$BACKEND_INFO" | cut -d'|' -f1)
 BACKEND_URL=$(echo "$BACKEND_INFO" | cut -d'|' -f2)
 echo "[INFO] Lade Backend $BACKEND_TAG herunter..."
-sm_download_and_extract "$BACKEND_URL" "$WEB_DIR/backend" "true" || exit 1
+BACKEND_ARCHIV="/tmp/sm-backend-$$.tar.gz"
+sm_download "$BACKEND_URL" "$BACKEND_ARCHIV" || exit 1
+
+# ASP.NET Core Runtime, die dieses Release braucht (runtimeconfig im Archiv), ueber Microsofts
+# dotnet-install.sh nach /opt/dotnet mit Link /usr/local/bin/dotnet - derselbe Ort wie frueher mit
+# dem Fremdskript dotnet9pi. Nur die Laufzeit, kein SDK (Backend-Issue #403). Ohne lesbare
+# runtimeconfig gilt die bisherige Hauptversion 9.0, damit nie ein Pi ohne Laufzeit dasteht.
+DOTNET_BENOETIGT=$(sm_dotnet_kanal_aus_archiv "$BACKEND_ARCHIV")
+if ! sm_dotnet_laufzeit_sicherstellen true "${DOTNET_BENOETIGT:-9.0}"; then
+    rm -f "$BACKEND_ARCHIV"
+    echo "[FEHLER] .NET-Laufzeit konnte nicht installiert werden - Installation abgebrochen."
+    exit 1
+fi
+
+sm_extract "$BACKEND_ARCHIV" "$WEB_DIR/backend" "true" || { rm -f "$BACKEND_ARCHIV"; exit 1; }
+rm -f "$BACKEND_ARCHIV"
 echo "[OK] Backend $BACKEND_TAG installiert."
 
 # Frontend herunterladen

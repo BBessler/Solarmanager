@@ -46,6 +46,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 sm_finish() {
     local code=$1
+    rm -f "${BACKEND_ARCHIV:-}"
     sleep 1   # letzte Zeilen durch tee flushen lassen
     if [ "$code" -eq 0 ]; then
         echo "success" > "$STATE_FILE"
@@ -160,13 +161,20 @@ echo "[AUTO] Update wird durchgefuehrt..."
 # liefe in einer Neustart-Schleife und die Oberflaeche waere weg. Deshalb hier nachinstallieren
 # (in die Schreibschicht des Containers; sie bleibt bei jedem Neustart erhalten, erst ein neu
 # erzeugter Container verliert sie). Dauerhaft bringt sie update_docker.sh mit dem neuen Image.
-if [ "$BACKEND_CHANGED" = true ]; then
-    if ! type sm_dotnet_laufzeit_sicherstellen > /dev/null 2>&1; then
+# Welche Laufzeit, steht im Release-Archiv - ein .NET-9-Release installiert nichts nach.
+BACKEND_ARCHIV=""
+if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_URL" ]; then
+    if ! type sm_dotnet_laufzeit_sicherstellen > /dev/null 2>&1 || ! type sm_extract > /dev/null 2>&1; then
         echo "[FEHLER] Die Bibliothek unter $LIB_DIR ist veraltet und GitHub nicht erreichbar."
         echo "[FEHLER] Bitte $LIB_DIR/lib_solarmanager.sh loeschen und das Update erneut starten."
         exit 1
     fi
-    if ! sm_dotnet_laufzeit_sicherstellen false; then
+    BACKEND_ARCHIV="/tmp/sm-backend-$$.tar.gz"
+    echo "[INFO] Lade Backend $LATEST_BACKEND_TAG herunter..."
+    sm_download "$LATEST_BACKEND_URL" "$BACKEND_ARCHIV" || exit 1
+    DOTNET_BENOETIGT=$(sm_dotnet_kanal_aus_archiv "$BACKEND_ARCHIV")
+    echo "[INFO] Das Backend braucht ASP.NET Core ${DOTNET_BENOETIGT:-(unbekannt)}."
+    if ! sm_dotnet_laufzeit_sicherstellen false "$DOTNET_BENOETIGT"; then
         echo "[FEHLER] Update abgebrochen - das bisherige Backend laeuft unveraendert weiter."
         echo "[FEHLER] Abhilfe: auf dem Host einmal ~/solarmanager/update_docker.sh ausfuehren (baut das Image neu)."
         exit 1
@@ -194,7 +202,8 @@ fi
 # entpackt - der Container startet direkt danach neu.
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_URL" ]; then
     echo "[INFO] Backend aktualisieren: $LATEST_BACKEND_TAG..."
-    sm_download_and_extract "$LATEST_BACKEND_URL" "$APP_DIR" || exit 1
+    sm_extract "$BACKEND_ARCHIV" "$APP_DIR" || exit 1
+    rm -f "$BACKEND_ARCHIV"
     # .NET 9 Static-Web-Assets-Manifest entfernen (Frontend wird separat deployed)
     rm -f "$APP_DIR/Solarmanager.staticwebassets.endpoints.json"
     echo "[OK] Backend aktualisiert."
@@ -236,7 +245,7 @@ if ! command -v ip > /dev/null 2>&1; then
 elif [ "${SM_DOTNET_NACHINSTALLIERT:-false}" = true ]; then
     # Die nachinstallierte Laufzeit liegt nur im Container. Wird er neu erzeugt (z. B. nach einer
     # Aenderung an docker-compose.yml), fehlt sie wieder - dann startet das Backend nicht.
-    echo "[HINWEIS] .NET $SM_DOTNET_KANAL wurde nur im Container nachinstalliert."
+    echo "[HINWEIS] .NET $DOTNET_BENOETIGT wurde nur im Container nachinstalliert."
     echo "[HINWEIS] Bitte bald einmal auf dem Host ~/solarmanager/update_docker.sh ausfuehren (neues Image)."
 fi
 
