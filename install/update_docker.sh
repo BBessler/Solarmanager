@@ -167,12 +167,22 @@ sm_dockerfile_geaendert() {
     return 0
 }
 
-# Hat das Image die ASP.NET Core Runtime <kanal>? Leerer Kanal = keine Aussage (gilt als ja).
+# Hat das Image die ASP.NET Core Runtime <kanal>?
+# Rueckgabe 0 = ja (auch bei leerem Kanal), 1 = fehlt, 2 = keine Aussage (Pruefung gescheitert).
+# "Keine Aussage" ist bewusst nicht "fehlt": Sonst baute ein Fehler der Pruefung bei jedem Lauf das
+# Image neu und sperrte den Backend-Tausch auch auf stabilen Geraeten. Eigener Name fuer den
+# Pruef-Container, weil der Dienst container_name "solarmanager" traegt.
 sm_image_hat_laufzeit() {
     local kanal="$1" laufzeiten
     [ -n "$kanal" ] || return 0
-    laufzeiten=$(docker compose run --rm --no-deps --entrypoint dotnet solarmanager --list-runtimes 2>/dev/null || true)
-    echo "$laufzeiten" | grep -q "^Microsoft\.AspNetCore\.App ${kanal//./\\.}\."
+    laufzeiten=$(docker compose run --rm --no-deps --name "solarmanager-laufzeitpruefung-$$" \
+        --entrypoint dotnet solarmanager --list-runtimes 2>/dev/null || true)
+    if ! echo "$laufzeiten" | grep -q "^Microsoft\.NETCore\.App "; then
+        echo "[WARN] Laufzeiten im Image nicht pruefbar (docker compose run)." >&2
+        return 2
+    fi
+    echo "$laufzeiten" | grep -q "^Microsoft\.AspNetCore\.App ${kanal//./\\.}\." && return 0
+    return 1
 }
 
 # Image bauen. Die .NET-Laufzeit des Backends geht als DOTNET_ZUSATZ mit: Das Dockerfile legt sie
@@ -207,7 +217,9 @@ if sm_dockerfile_geaendert; then
 fi
 # Laufzeit nur im Container nachinstalliert (Update ueber die Oberflaeche)? Dann fehlt sie im
 # Image, und ein neu erzeugter Container startete das Backend nicht mehr.
-if [ -n "$DOTNET_INSTALLIERT" ] && ! sm_image_hat_laufzeit "$DOTNET_INSTALLIERT"; then
+PRUEF_RC=0
+sm_image_hat_laufzeit "$DOTNET_INSTALLIERT" || PRUEF_RC=$?
+if [ "$PRUEF_RC" -eq 1 ]; then
     echo "[INFO] Dem Image fehlt die ASP.NET Core Runtime $DOTNET_INSTALLIERT des installierten Backends."
     IMAGE_VERALTET=true
 fi
@@ -271,8 +283,10 @@ if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
     sm_download "$LATEST_BACKEND_URL" "$BACKEND_ARCHIV" || exit 1
     DOTNET_BENOETIGT=$(sm_dotnet_kanal_aus_archiv "$BACKEND_ARCHIV")
     echo "[INFO] Das Backend braucht ASP.NET Core ${DOTNET_BENOETIGT:-(unbekannt)}."
-    if [ -n "$DOTNET_BENOETIGT" ] && ! sm_image_hat_laufzeit "$DOTNET_BENOETIGT"; then
-        IMAGE_VERALTET=true
+    if [ "$DOTNET_BENOETIGT" != "$DOTNET_INSTALLIERT" ]; then
+        PRUEF_RC=0
+        sm_image_hat_laufzeit "$DOTNET_BENOETIGT" || PRUEF_RC=$?
+        [ "$PRUEF_RC" -eq 1 ] && IMAGE_VERALTET=true
     fi
 fi
 
@@ -283,11 +297,17 @@ if [ "$IMAGE_VERALTET" = true ]; then
     sm_image_bauen "$DOTNET_BENOETIGT" || true
 fi
 
-# Backend aktualisieren (nur wenn geaendert). Vorher pruefen, ob das Image die .NET-Laufzeit
-# des neuen Backends hat - sonst nicht tauschen, das alte Backend laeuft weiter.
+# Backend aktualisieren (nur wenn geaendert). Braucht das neue Backend eine andere Laufzeit als das
+# laufende, vorher pruefen, ob das Image sie hat - sonst (oder ohne Aussage) nicht tauschen, das
+# alte Backend laeuft weiter. Gleiche Laufzeit wie bisher: keine Pruefung, das laufende Backend
+# zeigt, dass sie da ist (stabile Geraete werden so nie durch die Pruefung blockiert).
 if [ "$BACKEND_CHANGED" = true ] && [ -n "$LATEST_BACKEND_TAG" ]; then
-    if ! sm_image_hat_laufzeit "$DOTNET_BENOETIGT"; then
-        echo "[FEHLER] Im Docker-Image fehlt die ASP.NET Core Runtime $DOTNET_BENOETIGT."
+    PRUEF_RC=0
+    if [ "$DOTNET_BENOETIGT" != "$DOTNET_INSTALLIERT" ]; then
+        sm_image_hat_laufzeit "$DOTNET_BENOETIGT" || PRUEF_RC=$?
+    fi
+    if [ "$PRUEF_RC" -ne 0 ]; then
+        echo "[FEHLER] Im Docker-Image fehlt die ASP.NET Core Runtime $DOTNET_BENOETIGT (oder sie ist nicht pruefbar)."
         echo "[FEHLER] Backend nicht getauscht - das bisherige laeuft weiter. Image-Bau pruefen:"
         echo "         cd $INSTALL_DIR && docker compose build --build-arg DOTNET_ZUSATZ=$DOTNET_BENOETIGT solarmanager"
         docker compose up -d || true
